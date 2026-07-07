@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Flow — органайзер, который слушает</title>
+<meta name="theme-color" content="#EDEFEA">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #EDEFEA;
+    --card: #FBFBF8;
+    --ink: #23282A;
+    --ink-soft: #5B6461;
+    --moss: #6B7F5B;
+    --moss-deep: #55684A;
+    --clay: #C98A6B;
+    --clay-soft: #E7C9B8;
+    --line: #DADED4;
+    --danger-soft: #B9846F;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Inter', sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{ max-width:640px; margin:0 auto; padding:32px 20px 80px; }
+  .hero{ display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:28px; }
+  .hero h1{ font-family:'Fraunces', serif; font-weight:500; font-size:34px; margin:0; letter-spacing:-0.01em; }
+  .hero p{ margin:4px 0 0; color:var(--ink-soft); font-size:14px; }
+  .date-tag{ font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--ink-soft); text-align:right; line-height:1.5; }
+
+  .tabs{ display:flex; gap:4px; margin-bottom:24px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  .tab{ padding:10px 4px; margin-right:20px; font-size:14px; color:var(--ink-soft); cursor:pointer; border-bottom:2px solid transparent; user-select:none; }
+  .tab.active{ color:var(--ink); border-bottom:2px solid var(--moss); font-weight:500; }
+
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; margin-bottom:16px; }
+
+  .calm-card{ background:linear-gradient(135deg, rgba(107,127,91,0.08), rgba(201,138,107,0.08)); border:1px solid var(--line); border-radius:14px; padding:22px 20px; margin-bottom:16px; display:flex; align-items:flex-start; gap:14px; }
+  .calm-mark{ font-family:'Fraunces', serif; font-size:20px; color:var(--clay); line-height:1; margin-top:2px; }
+  .calm-text{ font-family:'Fraunces', serif; font-size:17px; font-weight:400; line-height:1.5; color:var(--ink); font-style:italic; }
+
+  .energy-row{ display:flex; align-items:center; gap:16px; }
+  .blob{ width:52px;height:52px;border-radius:50%; flex-shrink:0; background:radial-gradient(circle at 35% 30%, var(--clay-soft), var(--clay) 70%); box-shadow:0 0 0 6px rgba(201,138,107,0.12); animation:breathe 4.5s ease-in-out infinite; }
+  .blob.low{background:radial-gradient(circle at 35% 30%, #dfe3d8, var(--ink-soft) 130%); box-shadow:0 0 0 6px rgba(91,100,97,0.10); animation-duration:6.5s;}
+  .blob.normal{background:radial-gradient(circle at 35% 30%, var(--clay-soft), var(--clay) 70%); box-shadow:0 0 0 6px rgba(201,138,107,0.12); animation-duration:4.5s;}
+  .blob.high{background:radial-gradient(circle at 35% 30%, #d9e2c9, var(--moss) 75%); box-shadow:0 0 0 6px rgba(107,127,91,0.14); animation-duration:2.8s;}
+  @keyframes breathe{ 0%,100%{transform:scale(1);} 50%{transform:scale(1.12);} }
+  .energy-buttons{display:flex; gap:8px; flex-wrap:wrap;}
+  .energy-btn{ font-family:'Inter'; font-size:13px; padding:8px 14px; border-radius:20px; border:1px solid var(--line); background:transparent; color:var(--ink-soft); cursor:pointer; transition:all .15s ease; }
+  .energy-btn:hover{border-color:var(--moss);}
+  .energy-btn.selected{ background:var(--moss); color:#fff; border-color:var(--moss); }
+
+  textarea{ width:100%; resize:none; border:none; background:transparent; font-family:'Inter'; font-size:15px; color:var(--ink); line-height:1.5; min-height:52px; outline:none; }
+  textarea::placeholder{color:#9AA39B;}
+  .input-card{ display:flex; flex-direction:column; gap:10px; }
+  .input-footer{ display:flex; justify-content:space-between; align-items:center; }
+  .hint{font-size:12px; color:var(--ink-soft);}
+  button.primary{ font-family:'Inter'; font-weight:500; font-size:14px; padding:9px 18px; border-radius:10px; border:none; background:var(--ink); color:#fff; cursor:pointer; }
+  button.primary:disabled{opacity:0.5; cursor:default;}
+  button.primary:hover:not(:disabled){background:var(--moss-deep);}
+  input[type=text], input[type=email], input[type=password], input[type=time]{
+    font-family:'Inter'; font-size:14px; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:transparent; outline:none; color:var(--ink);
+  }
+
+  .section-label{ font-size:12px; text-transform:uppercase; letter-spacing:0.08em; color:var(--ink-soft); margin:28px 0 12px; }
+  .task{ display:flex; align-items:flex-start; gap:12px; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:10px; cursor:pointer; transition:border-color .15s ease, background .15s ease; animation: fadeInUp .25s ease; }
+  .task:hover{border-color:var(--moss);}
+  .task:active{background:var(--bg);}
+  .checkbox{ width:22px;height:22px; border-radius:50%; border:1.5px solid var(--moss); flex-shrink:0; margin-top:2px; cursor:pointer; position:relative; pointer-events:none; }
+  .checkbox.done{background:var(--moss);}
+  .checkbox.done::after{ content:''; position:absolute; left:6px; top:2px; width:5px; height:9px; border:solid white; border-width:0 2px 2px 0; transform:rotate(45deg); }
+  .task-body{flex:1;}
+  .task-title{font-size:15px; line-height:1.4;}
+  .task-title.done{text-decoration:line-through; color:var(--ink-soft);}
+  .task-meta{ display:flex; gap:8px; margin-top:5px; flex-wrap:wrap; align-items:center; }
+  .pill{ font-family:'IBM Plex Mono', monospace; font-size:11px; padding:2px 8px; border-radius:20px; background:var(--bg); color:var(--ink-soft); }
+  .pill.urgent{background:#F3DED4; color:var(--danger-soft);}
+  .split-link{ font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--moss-deep); text-decoration:underline; cursor:pointer; }
+  .empty{ color:var(--ink-soft); font-size:14px; padding:20px 0; }
+  .toggle-full{ font-size:13px; color:var(--moss-deep); cursor:pointer; display:inline-block; margin-top:6px; }
+
+  @keyframes fadeInUp{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+  #tab-today, #tab-all, #tab-week, #tab-evening, #tab-profile{ animation: fadeInUp .3s ease; }
+
+  .filter-row{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+  .filter-chip{ font-family:'Inter'; font-size:12px; padding:6px 12px; border-radius:20px; border:1px solid var(--line); background:transparent; color:var(--ink-soft); cursor:pointer; }
+  .filter-chip.active{ background:var(--ink); color:#fff; border-color:var(--ink); }
+
+  .gentle-toast{ background:var(--clay-soft); color:var(--ink); border-radius:12px; padding:12px 16px; font-size:14px; margin-bottom:16px; animation: fadeInUp .3s ease; }
+
+  .week-day{ margin-bottom:14px; }
+  .week-day-label{ font-family:'IBM Plex Mono', monospace; font-size:11px; text-transform:uppercase; color:var(--ink-soft); margin-bottom:4px; }
+
+  .log-entry{ font-size:14px; padding:10px 0; border-bottom:1px solid var(--line); }
+  .log-entry:last-child{ border-bottom:none; }
+  .log-input-row{ display:flex; gap:8px; margin-top:14px; }
+  .log-input-row input{ flex:1; }
+  .status{ font-size:12px; color:var(--ink-soft); margin-top:8px; min-height:16px; }
+
+  body.evening-theme{ --bg: #23282A; --card: #2E3436; --ink: #EDEFEA; --ink-soft: #9AA39B; --line: #3C4345; }
+  body.evening-theme .calm-card{ background:linear-gradient(135deg, rgba(107,127,91,0.16), rgba(201,138,107,0.12)); }
+
+  /* auth screen */
+  #authScreen{ max-width:380px; margin:80px auto; padding:0 20px; }
+  #authScreen h1{ font-family:'Fraunces', serif; font-size:32px; margin-bottom:6px; }
+  #authScreen p{ color:var(--ink-soft); font-size:14px; margin-bottom:24px; }
+  .auth-field{ margin-bottom:12px; }
+  .auth-field input{ width:100%; padding:12px; }
+  .auth-switch{ font-size:13px; color:var(--moss-deep); cursor:pointer; margin-top:14px; text-align:center; }
+  #app{ display:none; }
+</style>
+</head>
+<body>
+
+<!-- AUTH SCREEN -->
+<div id="authScreen">
+  <h1>Flow</h1>
+  <p id="authTagline">Расскажи, что нужно сделать — остальное само разберётся</p>
+  <div class="card">
+    <div class="auth-field"><input type="text" id="authName" placeholder="Имя (только для регистрации)"></div>
+    <div class="auth-field"><input type="email" id="authEmail" placeholder="Email"></div>
+    <div class="auth-field"><input type="password" id="authPassword" placeholder="Пароль"></div>
+    <button class="primary" id="authSubmitBtn" style="width:100%;">Войти</button>
+    <div class="status" id="authStatus"></div>
+  </div>
+  <div class="auth-switch" id="authSwitch">Ещё нет аккаунта? Зарегистрироваться</div>
+</div>
+
+<!-- APP -->
+<div id="app">
+<div class="wrap">
+
+  <div class="hero">
+    <div>
+      <h1>Flow</h1>
+      <p id="heroSubtitle">Расскажи, что нужно сделать — остальное само разберётся</p>
+    </div>
+    <div class="date-tag" id="dateTag"></div>
+  </div>
+
+  <div class="gentle-toast" id="gentleToast" style="display:none;"></div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="today">Сегодня</div>
+    <div class="tab" data-tab="all">Все дела</div>
+    <div class="tab" data-tab="week">Неделя</div>
+    <div class="tab" data-tab="evening">Вечер</div>
+    <div class="tab" data-tab="profile">Профиль</div>
+  </div>
+
+  <!-- TODAY TAB -->
+  <div id="tab-today">
+    <div class="calm-card" id="calmCard">
+      <div class="calm-mark">＊</div>
+      <div class="calm-text" id="calmText"></div>
+    </div>
+
+    <div class="card">
+      <div class="energy-row">
+        <div class="blob normal" id="energyBlob"></div>
+        <div>
+          <div style="font-size:13px; color:var(--ink-soft); margin-bottom:8px;">Как сегодня с силами?</div>
+          <div class="energy-buttons">
+            <button class="energy-btn" data-energy="low">мало сил</button>
+            <button class="energy-btn selected" data-energy="normal">нормально</button>
+            <button class="energy-btn" data-energy="high">много энергии</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card input-card">
+      <textarea id="capture" placeholder="например: забрать посылку, доделать отчёт и не забыть про день рождения мамы в субботу"></textarea>
+      <div class="input-footer">
+        <span class="hint">Пиши или наговори — Flow сам разберёт на дела</span>
+        <div style="display:flex; gap:8px;">
+          <button class="primary" id="voiceBtn" style="background:var(--card); color:var(--ink); border:1px solid var(--line);" title="Голосовой ввод">🎤</button>
+          <button class="primary" id="addBtn">Добавить</button>
+        </div>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="card" id="shareCard">
+      <div style="font-size:13px; color:var(--ink-soft); margin-bottom:6px;">Поделиться своим списком</div>
+      <div class="hint" style="margin-bottom:10px;">Список станет виден любому, у кого есть твой код.</div>
+      <div class="log-input-row" style="margin-top:0;">
+        <button class="primary" id="shareBtn">Получить код и поделиться</button>
+      </div>
+      <div class="status" id="shareStatus"></div>
+      <div style="margin-top:16px; border-top:1px solid var(--line); padding-top:14px;">
+        <div style="font-size:13px; color:var(--ink-soft); margin-bottom:8px;">Посмотреть список другого человека</div>
+        <div class="log-input-row" style="margin-top:0;">
+          <input type="text" id="viewCodeInput" placeholder="вставь код" style="flex:1;">
+          <button class="primary" id="viewCodeBtn">Открыть</button>
+        </div>
+        <div id="sharedListView" style="margin-top:12px;"></div>
+      </div>
+    </div>
+
+    <div class="section-label">На сейчас</div>
+    <div id="adaptiveList"></div>
+    <div class="toggle-full" id="showAllLink" style="display:none;"></div>
+  </div>
+
+  <!-- ALL TAB -->
+  <div id="tab-all" style="display:none;">
+    <div class="section-label" style="margin-top:0;">Все дела</div>
+    <div class="filter-row">
+      <button class="filter-chip active" data-filter="all">все</button>
+      <button class="filter-chip" data-filter="work">работа</button>
+      <button class="filter-chip" data-filter="home">дом</button>
+      <button class="filter-chip" data-filter="errands">поручения</button>
+      <button class="filter-chip" data-filter="personal">личное</button>
+      <button class="filter-chip" data-filter="other">разное</button>
+    </div>
+    <div id="fullList"></div>
+  </div>
+
+  <!-- WEEK TAB -->
+  <div id="tab-week" style="display:none;">
+    <div class="card">
+      <div class="section-label" style="margin-top:0;">Что получилось за последние 7 дней</div>
+      <div id="weekList"></div>
+    </div>
+  </div>
+
+  <!-- EVENING TAB -->
+  <div id="tab-evening" style="display:none;">
+    <div class="card">
+      <div class="section-label" style="margin-top:0;">Что сегодня получилось</div>
+      <div id="logList"></div>
+      <div class="log-input-row">
+        <input type="text" id="logInput" placeholder="добавить то, что не было в плане..." style="flex:1;">
+        <button class="primary" id="logAddBtn">+</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="font-size:13px; color:var(--ink-soft); margin-bottom:8px;">Тихое напоминание вечером</div>
+      <div class="log-input-row" style="margin-top:0;">
+        <input type="time" id="reminderTime" style="flex:none; width:120px;">
+        <button class="primary" id="reminderSaveBtn">Сохранить</button>
+      </div>
+      <div class="hint" id="reminderStatus" style="margin-top:8px;">Тихая подсказка в этом окне, когда придёт время — без звука и напора.</div>
+    </div>
+  </div>
+
+  <!-- PROFILE TAB -->
+  <div id="tab-profile" style="display:none;">
+    <div class="card">
+      <div class="section-label" style="margin-top:0;">Как вас зовут?</div>
+      <div class="hint" style="margin-bottom:12px;">Flow будет обращаться к вам по имени.</div>
+      <div class="log-input-row" style="margin-top:0;">
+        <input type="text" id="profileNameInput" placeholder="например: Аня" style="flex:1;">
+        <button class="primary" id="profileNameSaveBtn">Сохранить</button>
+      </div>
+      <div class="status" id="profileNameStatus"></div>
+    </div>
+    <div class="card">
+      <div class="section-label" style="margin-top:0;">Выйти</div>
+      <button class="primary" id="logoutBtn" style="background:var(--card); color:var(--ink); border:1px solid var(--line);">Выйти из аккаунта</button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+const API = '';
+let token = localStorage.getItem('flowToken');
+
+// ---------- API helper ----------
+async function api(path, options={}){
+  const headers = Object.assign({'Content-Type':'application/json'}, options.headers||{});
+  if(token) headers['Authorization'] = 'Bearer '+token;
+  const res = await fetch(API+path, Object.assign({}, options, { headers }));
+  if(res.status === 401){
+    logout();
+    throw new Error('Сессия истекла, войдите снова');
+  }
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || 'Ошибка запроса');
+  return data;
+}
+
+// ---------- auth screen ----------
+let authMode = 'login';
+document.getElementById('authSwitch').addEventListener('click', ()=>{
+  authMode = authMode === 'login' ? 'register' : 'login';
+  document.getElementById('authSubmitBtn').textContent = authMode === 'login' ? 'Войти' : 'Создать аккаунт';
+  document.getElementById('authSwitch').textContent = authMode === 'login' ? 'Ещё нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти';
+  document.getElementById('authName').style.display = authMode === 'register' ? 'block' : 'none';
+});
+document.getElementById('authName').style.display = 'none';
+
+document.getElementById('authSubmitBtn').addEventListener('click', async ()=>{
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const name = document.getElementById('authName').value.trim();
+  const status = document.getElementById('authStatus');
+  if(!email || !password){ status.textContent = 'Введите email и пароль.'; return; }
+  status.textContent = 'Секунду...';
+  try{
+    const path = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+    const body = authMode === 'login' ? {email,password} : {email,password,name};
+    const data = await api(path, { method:'POST', body: JSON.stringify(body) });
+    token = data.token;
+    localStorage.setItem('flowToken', token);
+    startApp();
+  }catch(e){
+    status.textContent = e.message;
+  }
+});
+
+function logout(){
+  token = null;
+  localStorage.removeItem('flowToken');
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('authScreen').style.display = 'block';
+}
+
+// ---------- date ----------
+function todayKey(){ return new Date().toISOString().slice(0,10); }
+function formatDateHeader(){ return new Date().toLocaleDateString('ru-RU', {weekday:'long', day:'numeric', month:'long'}); }
+
+let tasks = [];
+let energyLevel = 'normal';
+let showAllOnToday = false;
+let currentFilter = 'all';
+
+async function startApp(){
+  document.getElementById('authScreen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('dateTag').textContent = formatDateHeader();
+  renderCalmCard();
+  await initGreeting();
+  await loadEnergy();
+  await loadTasks();
+  render();
+}
+
+async function loadTasks(){
+  try{ tasks = await api('/api/tasks'); }catch(e){ tasks = []; }
+}
+async function loadEnergy(){
+  try{
+    const r = await api('/api/energy/'+todayKey());
+    energyLevel = r.level;
+    document.querySelectorAll('.energy-btn').forEach(b=>b.classList.toggle('selected', b.dataset.energy===energyLevel));
+    document.getElementById('energyBlob').className = 'blob '+energyLevel;
+  }catch(e){ energyLevel = 'normal'; }
+}
+
+document.querySelectorAll('.energy-btn').forEach(btn=>{
+  btn.addEventListener('click', async ()=>{
+    document.querySelectorAll('.energy-btn').forEach(b=>b.classList.remove('selected'));
+    btn.classList.add('selected');
+    energyLevel = btn.dataset.energy;
+    document.getElementById('energyBlob').className = 'blob '+energyLevel;
+    try{ await api('/api/energy/'+todayKey(), { method:'PUT', body: JSON.stringify({level:energyLevel}) }); }catch(e){}
+    render();
+  });
+});
+
+// ---------- tabs ----------
+document.querySelectorAll('.tab').forEach(tab=>{
+  tab.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    ['today','all','week','evening','profile'].forEach(name=>{
+      document.getElementById('tab-'+name).style.display = (name===tab.dataset.tab) ? 'block' : 'none';
+    });
+    document.body.classList.toggle('evening-theme', tab.dataset.tab === 'evening');
+    if(tab.dataset.tab === 'evening'){ renderLog(); loadReminderSetting(); }
+    if(tab.dataset.tab === 'all') renderFullList();
+    if(tab.dataset.tab === 'week') renderWeek();
+    if(tab.dataset.tab === 'profile') loadProfileName();
+  });
+});
+
+// ---------- capture ----------
+document.getElementById('addBtn').addEventListener('click', handleCapture);
+async function handleCapture(){
+  const input = document.getElementById('capture');
+  const text = input.value.trim();
+  if(!text) return;
+  const btn = document.getElementById('addBtn');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  status.textContent = 'Разбираю...';
+  try{
+    const newTasks = await api('/api/parse', { method:'POST', body: JSON.stringify({text}) });
+    tasks = tasks.concat(newTasks);
+    input.value = '';
+    status.textContent = 'Добавлено: '+newTasks.length+' '+(newTasks.length===1?'дело':'дела/дел');
+    render();
+  }catch(e){
+    status.textContent = e.message;
+  }finally{
+    btn.disabled = false;
+    setTimeout(()=>{ status.textContent=''; }, 3000);
+  }
+}
+
+// ---------- rendering ----------
+function energyCount(){ if(energyLevel==='low') return 2; if(energyLevel==='high') return 6; return 3; }
+function urgencyRank(u){ return u==='high' ? 0 : (u==='normal' ? 1 : 2); }
+
+function render(){
+  const open = tasks.filter(t=>!t.done).sort((a,b)=>urgencyRank(a.urgency)-urgencyRank(b.urgency)||a.createdAt-b.createdAt);
+  const count = energyCount();
+  const visible = showAllOnToday ? open : open.slice(0, count);
+  const list = document.getElementById('adaptiveList');
+  list.innerHTML = '';
+  if(open.length===0){
+    list.innerHTML = '<div class="empty">Пусто. Расскажи, что нужно сделать — и появится здесь.</div>';
+  } else {
+    visible.forEach(t=> list.appendChild(renderTask(t)));
+  }
+  const link = document.getElementById('showAllLink');
+  if(open.length > count){
+    link.style.display = 'inline-block';
+    link.textContent = showAllOnToday ? 'показывать только по силам ↑' : `+ ещё ${open.length-count} дел (скрыто, чтобы не давить)`;
+    link.onclick = ()=>{ showAllOnToday = !showAllOnToday; render(); };
+  } else {
+    link.style.display = 'none';
+  }
+}
+
+document.querySelectorAll('.filter-chip').forEach(chip=>{
+  chip.addEventListener('click', ()=>{
+    document.querySelectorAll('.filter-chip').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    currentFilter = chip.dataset.filter;
+    renderFullList();
+  });
+});
+
+function renderFullList(){
+  const list = document.getElementById('fullList');
+  list.innerHTML = '';
+  let filtered = currentFilter==='all' ? tasks : tasks.filter(t=>t.context===currentFilter);
+  if(filtered.length===0){
+    list.innerHTML = '<div class="empty">Здесь пока ничего нет.</div>';
+    return;
+  }
+  const sorted = [...filtered].sort((a,b)=> (a.done - b.done) || urgencyRank(a.urgency)-urgencyRank(b.urgency));
+  sorted.forEach(t=> list.appendChild(renderTask(t)));
+}
+
+function contextLabel(c){ return {work:'работа', home:'дом', errands:'поручения', personal:'личное', other:'разное'}[c] || 'разное'; }
+
+function renderTask(t){
+  const el = document.createElement('div');
+  el.className = 'task';
+  el.innerHTML = `
+    <div class="checkbox ${t.done?'done':''}"></div>
+    <div class="task-body">
+      <div class="task-title ${t.done?'done':''}">${escapeHtml(t.title)}</div>
+      <div class="task-meta">
+        <span class="pill">${contextLabel(t.context)}</span>
+        ${t.due ? `<span class="pill">${escapeHtml(t.due)}</span>` : ''}
+        ${t.urgency==='high' ? `<span class="pill urgent">важно</span>` : ''}
+        ${!t.done ? `<span class="split-link">разбить на шаги</span>` : ''}
+      </div>
+    </div>
+  `;
+  el.addEventListener('click', async (ev)=>{
+    if(ev.target.classList.contains('split-link')) return;
+    t.done = !t.done;
+    try{
+      await api('/api/tasks/'+t.id, { method:'PUT', body: JSON.stringify({done:t.done}) });
+      if(t.done){ await api('/api/log/'+todayKey(), { method:'POST', body: JSON.stringify({text:t.title}) }); }
+    }catch(e){}
+    render();
+    renderFullList();
+  });
+  const splitLink = el.querySelector('.split-link');
+  if(splitLink){
+    splitLink.addEventListener('click', async (ev)=>{
+      ev.stopPropagation();
+      splitLink.textContent = 'разбираю...';
+      try{
+        const newTasks = await api('/api/tasks/'+t.id+'/split', { method:'POST' });
+        tasks = tasks.filter(x=>x.id!==t.id).concat(newTasks);
+        render();
+        renderFullList();
+      }catch(e){
+        splitLink.textContent = 'не получилось, попробуй ещё раз';
+      }
+    });
+  }
+  return el;
+}
+
+function escapeHtml(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ---------- evening log ----------
+async function renderLog(){
+  const list = document.getElementById('logList');
+  list.innerHTML = '<div class="hint">Загружаю...</div>';
+  try{
+    const entries = await api('/api/log/'+todayKey());
+    list.innerHTML = '';
+    if(entries.length===0){
+      list.innerHTML = '<div class="empty">Пока пусто — но день ещё не закончен.</div>';
+    } else {
+      entries.forEach(entry=>{
+        const el = document.createElement('div');
+        el.className = 'log-entry';
+        el.textContent = '— '+entry;
+        list.appendChild(el);
+      });
+    }
+  }catch(e){
+    list.innerHTML = '<div class="empty">Не получилось загрузить.</div>';
+  }
+}
+document.getElementById('logAddBtn').addEventListener('click', addLogEntry);
+document.getElementById('logInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter') addLogEntry(); });
+async function addLogEntry(){
+  const input = document.getElementById('logInput');
+  const val = input.value.trim();
+  if(!val) return;
+  try{
+    await api('/api/log/'+todayKey(), { method:'POST', body: JSON.stringify({text:val}) });
+    input.value='';
+    renderLog();
+  }catch(e){}
+}
+
+// ---------- week ----------
+async function renderWeek(){
+  const container = document.getElementById('weekList');
+  container.innerHTML = '<div class="hint">Собираю неделю...</div>';
+  try{
+    const blocks = await api('/api/log-week');
+    if(blocks.length===0){
+      container.innerHTML = '<div class="empty">За последние 7 дней здесь пока пусто — но начать никогда не поздно.</div>';
+      return;
+    }
+    container.innerHTML = '';
+    blocks.forEach(b=>{
+      const d = new Date(b.date);
+      const label = d.toLocaleDateString('ru-RU', {weekday:'long', day:'numeric', month:'long'});
+      const dayEl = document.createElement('div');
+      dayEl.className = 'week-day';
+      dayEl.innerHTML = `<div class="week-day-label">${label}</div>`;
+      b.entries.forEach(e=>{
+        const line = document.createElement('div');
+        line.className = 'log-entry';
+        line.textContent = '— '+e;
+        dayEl.appendChild(line);
+      });
+      container.appendChild(dayEl);
+    });
+  }catch(e){
+    container.innerHTML = '<div class="empty">Не получилось загрузить неделю.</div>';
+  }
+}
+
+// ---------- reminder ----------
+async function loadReminderSetting(){
+  try{
+    const r = await api('/api/reminder');
+    document.getElementById('reminderTime').value = r.time || '';
+  }catch(e){}
+}
+document.getElementById('reminderSaveBtn').addEventListener('click', async ()=>{
+  const val = document.getElementById('reminderTime').value;
+  const status = document.getElementById('reminderStatus');
+  if(!val){ status.textContent = 'Выбери время, если хочешь тихое напоминание.'; return; }
+  try{
+    await api('/api/reminder', { method:'PUT', body: JSON.stringify({time:val}) });
+    status.textContent = 'Хорошо — тихо напомню в '+val+', пока открыт Flow.';
+  }catch(e){
+    status.textContent = 'Не получилось сохранить.';
+  }
+});
+function showGentleToast(text){
+  const toast = document.getElementById('gentleToast');
+  toast.textContent = text;
+  toast.style.display = 'block';
+}
+let lastReminderCheck = null;
+setInterval(async ()=>{
+  if(!token) return;
+  try{
+    const r = await api('/api/reminder');
+    if(!r.time) return;
+    const now = new Date();
+    const current = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+    const key = todayKey()+current;
+    if(current === r.time && lastReminderCheck !== key){
+      lastReminderCheck = key;
+      showGentleToast('Тихая пауза — можно заглянуть в вечер и посмотреть, что сегодня получилось.');
+    }
+  }catch(e){}
+}, 30000);
+
+// ---------- voice input ----------
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+const voiceBtn = document.getElementById('voiceBtn');
+if(SpeechRecognitionCtor){
+  const recognition = new SpeechRecognitionCtor();
+  recognition.lang = 'ru-RU';
+  recognition.interimResults = false;
+  let listening = false;
+  voiceBtn.addEventListener('click', ()=>{
+    if(listening) return;
+    listening = true;
+    voiceBtn.textContent = '●';
+    recognition.start();
+  });
+  recognition.onresult = (e)=>{
+    const transcript = e.results[0][0].transcript;
+    const ta = document.getElementById('capture');
+    ta.value = ta.value ? (ta.value + ' ' + transcript) : transcript;
+  };
+  recognition.onend = ()=>{ listening = false; voiceBtn.textContent = '🎤'; };
+  recognition.onerror = ()=>{ listening = false; voiceBtn.textContent = '🎤'; };
+} else {
+  voiceBtn.style.display = 'none';
+}
+
+// ---------- sharing ----------
+document.getElementById('shareBtn').addEventListener('click', async ()=>{
+  const status = document.getElementById('shareStatus');
+  status.textContent = 'Готовлю...';
+  try{
+    const data = await api('/api/share', { method:'POST' });
+    status.innerHTML = 'Твой код: <b>'+data.code+'</b> — отправь его человеку.';
+  }catch(e){
+    status.textContent = 'Не получилось создать код.';
+  }
+});
+document.getElementById('viewCodeBtn').addEventListener('click', async ()=>{
+  const code = document.getElementById('viewCodeInput').value.trim();
+  const view = document.getElementById('sharedListView');
+  if(!code) return;
+  view.innerHTML = '<div class="hint">Загружаю...</div>';
+  try{
+    const res = await fetch('/api/share/'+encodeURIComponent(code));
+    const data = await res.json();
+    if(!res.ok || !data.tasks || data.tasks.length===0){
+      view.innerHTML = '<div class="empty">Пусто или код не найден.</div>';
+      return;
+    }
+    view.innerHTML = '';
+    data.tasks.forEach(t=>{
+      const el = document.createElement('div');
+      el.className = 'log-entry';
+      el.textContent = '— '+t.title;
+      view.appendChild(el);
+    });
+  }catch(e){
+    view.innerHTML = '<div class="empty">Не получилось загрузить.</div>';
+  }
+});
+
+// ---------- calm card ----------
+const calmPhrases = [
+  "Сделанное сегодня — уже достаточно.",
+  "Не всё нужно успеть сразу. Достаточно того, на что хватает сил.",
+  "Список не исчезает, если вы отдыхаете — он просто ждёт.",
+  "Маленький шаг тоже считается.",
+  "Не спешить — это тоже способ двигаться вперёд.",
+  "То, что не сделано сегодня, не исчезло — оно просто подождёт до момента, когда будут силы.",
+  "Порядок — это не про идеально, а про честно.",
+  "Иногда лучшее дело на сегодня — просто отдохнуть.",
+  "Вы не обязаны быть продуктивны каждую минуту.",
+  "Прогресс тише, чем кажется — но он есть.",
+  "Хватит на сегодня — нормальная и достаточная мера.",
+  "Забота о себе тоже входит в список дел.",
+  "Не всё горит. Многое может подождать до завтра.",
+  "Тишина в списке дел — тоже результат.",
+  "Иногда самое важное дело — просто заметить, что уже сделано.",
+  "Вы двигаетесь в своём темпе, и этого достаточно.",
+  "Не каждый день должен быть продуктивным, чтобы быть хорошим.",
+  "Маленькие дела складываются в большие перемены — незаметно, но верно.",
+  "Отдых — не пауза в жизни, а её часть.",
+  "Сегодня можно сделать меньше. Это не откат назад."
+];
+function dayOfYear(){ const now = new Date(); const start = new Date(now.getFullYear(), 0, 0); return Math.floor((now-start)/86400000); }
+function renderCalmCard(){ document.getElementById('calmText').textContent = calmPhrases[dayOfYear() % calmPhrases.length]; }
+
+// ---------- profile / greeting ----------
+function applyGreeting(name){
+  const subtitle = document.getElementById('heroSubtitle');
+  if(name){
+    subtitle.textContent = 'Привет, '+name+' — расскажи, что нужно сделать сегодня';
+  } else {
+    subtitle.innerHTML = `Расскажи, что нужно сделать — остальное само разберётся · <span id="nameLink" style="text-decoration:underline; cursor:pointer; color:var(--moss-deep);">сказать, как вас зовут?</span>`;
+    const link = document.getElementById('nameLink');
+    if(link) link.addEventListener('click', ()=>{ document.querySelector('.tab[data-tab="profile"]').click(); });
+  }
+}
+async function initGreeting(){
+  try{ const me = await api('/api/me'); applyGreeting(me.name); }
+  catch(e){ applyGreeting(null); }
+}
+async function loadProfileName(){
+  try{ const me = await api('/api/me'); document.getElementById('profileNameInput').value = me.name || ''; }
+  catch(e){}
+}
+document.getElementById('profileNameSaveBtn').addEventListener('click', async ()=>{
+  const input = document.getElementById('profileNameInput');
+  const status = document.getElementById('profileNameStatus');
+  const name = input.value.trim();
+  if(!name){ status.textContent = 'Введите имя.'; return; }
+  try{
+    await api('/api/me', { method:'PUT', body: JSON.stringify({name}) });
+    applyGreeting(name);
+    status.textContent = 'Сохранено.';
+  }catch(e){
+    status.textContent = 'Не получилось сохранить.';
+  }
+});
+document.getElementById('logoutBtn').addEventListener('click', logout);
+
+// ---------- init ----------
+if(token){ startApp(); } else { document.getElementById('authScreen').style.display = 'block'; }
+
+// ---------- PWA service worker ----------
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('/service-worker.js').catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>
