@@ -1,0 +1,4 @@
+provider: github
+owner: xyzftf
+repo: flow-app
+updaterCacheDirName: flow-updater

@@ -1,16 +1,34 @@
 {
   "name": "flow-app",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Flow — adaptive organizer with conversational input",
-  "main": "server.js",
+  "main": "electron-main.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "desktop": "electron .",
+    "dist:win": "electron-builder --win nsis",
+    "release:win": "electron-builder --win nsis --publish always"
   },
   "dependencies": {
     "express": "^4.19.2",
-    "cors": "^2.8.5",
     "jsonwebtoken": "^9.0.2",
     "lowdb": "^1.0.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "electron": "^38.1.2",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.flow.organizer",
+    "productName": "Flow",
+    "asar": true,
+    "files": ["electron-main.js", "server.js", "package.json", "public/**/*"],
+    "extraResources": [{ "from": "app-update.yml", "to": "app-update.yml" }],
+    "directories": { "output": "dist" },
+    "win": { "target": "nsis", "icon": "public/icons/icon-512.png", "signAndEditExecutable": false },
+    "publish": [{ "provider": "github", "owner": "xyzftf", "repo": "flow-app", "releaseType": "release" }],
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "createStartMenuShortcut": true }
   }
 }

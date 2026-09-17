@@ -151,7 +151,7 @@
     <div class="tab active" data-tab="today">Сегодня</div>
     <div class="tab" data-tab="all">Все дела</div>
     <div class="tab" data-tab="week">Неделя</div>
-    <div class="tab" data-tab="evening">Вечер</div>
+    <div class="tab" id="themeToggle" data-theme-toggle="true">Вечерний фон</div>
     <div class="tab" data-tab="profile">Профиль</div>
   </div>
 
@@ -232,26 +232,6 @@
     </div>
   </div>
 
-  <!-- EVENING TAB -->
-  <div id="tab-evening" style="display:none;">
-    <div class="card">
-      <div class="section-label" style="margin-top:0;">Что сегодня получилось</div>
-      <div id="logList"></div>
-      <div class="log-input-row">
-        <input type="text" id="logInput" placeholder="добавить то, что не было в плане..." style="flex:1;">
-        <button class="primary" id="logAddBtn">+</button>
-      </div>
-    </div>
-    <div class="card">
-      <div style="font-size:13px; color:var(--ink-soft); margin-bottom:8px;">Тихое напоминание вечером</div>
-      <div class="log-input-row" style="margin-top:0;">
-        <input type="time" id="reminderTime" style="flex:none; width:120px;">
-        <button class="primary" id="reminderSaveBtn">Сохранить</button>
-      </div>
-      <div class="hint" id="reminderStatus" style="margin-top:8px;">Тихая подсказка в этом окне, когда придёт время — без звука и напора.</div>
-    </div>
-  </div>
-
   <!-- PROFILE TAB -->
   <div id="tab-profile" style="display:none;">
     <div class="card">
@@ -275,13 +255,25 @@
 <script>
 const API = '';
 let token = localStorage.getItem('flowToken');
+let darkTheme = localStorage.getItem('flowTheme') === 'dark';
+function applyTheme(){
+  document.body.classList.toggle('evening-theme', darkTheme);
+  const toggle = document.getElementById('themeToggle');
+  if(toggle) toggle.textContent = darkTheme ? 'Светлый фон' : 'Вечерний фон';
+}
+applyTheme();
 
 // ---------- API helper ----------
 async function api(path, options={}){
   const headers = Object.assign({'Content-Type':'application/json'}, options.headers||{});
   if(token) headers['Authorization'] = 'Bearer '+token;
-  const res = await fetch(API+path, Object.assign({}, options, { headers }));
-  if(res.status === 401){
+  let res;
+  try{
+    res = await fetch(API+path, Object.assign({}, options, { headers }));
+  }catch(e){
+    throw new Error('Сервер Flow недоступен. Перезапусти приложение.');
+  }
+  if(res.status === 401 && token && !path.startsWith('/api/auth/')){
     logout();
     throw new Error('Сессия истекла, войдите снова');
   }
@@ -372,13 +364,17 @@ document.querySelectorAll('.energy-btn').forEach(btn=>{
 // ---------- tabs ----------
 document.querySelectorAll('.tab').forEach(tab=>{
   tab.addEventListener('click', ()=>{
+    if(tab.dataset.themeToggle){
+      darkTheme = !darkTheme;
+      localStorage.setItem('flowTheme', darkTheme ? 'dark' : 'light');
+      applyTheme();
+      return;
+    }
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
     tab.classList.add('active');
     ['today','all','week','evening','profile'].forEach(name=>{
       document.getElementById('tab-'+name).style.display = (name===tab.dataset.tab) ? 'block' : 'none';
     });
-    document.body.classList.toggle('evening-theme', tab.dataset.tab === 'evening');
-    if(tab.dataset.tab === 'evening'){ renderLog(); loadReminderSetting(); }
     if(tab.dataset.tab === 'all') renderFullList();
     if(tab.dataset.tab === 'week') renderWeek();
     if(tab.dataset.tab === 'profile') loadProfileName();
@@ -474,11 +470,15 @@ function renderTask(t){
   `;
   el.addEventListener('click', async (ev)=>{
     if(ev.target.classList.contains('split-link')) return;
+    const previous = t.done;
     t.done = !t.done;
     try{
       await api('/api/tasks/'+t.id, { method:'PUT', body: JSON.stringify({done:t.done}) });
       if(t.done){ await api('/api/log/'+todayKey(), { method:'POST', body: JSON.stringify({text:t.title}) }); }
-    }catch(e){}
+    }catch(e){
+      t.done = previous;
+      showGentleToast(e.message);
+    }
     render();
     renderFullList();
   });
@@ -501,40 +501,6 @@ function renderTask(t){
 }
 
 function escapeHtml(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-
-// ---------- evening log ----------
-async function renderLog(){
-  const list = document.getElementById('logList');
-  list.innerHTML = '<div class="hint">Загружаю...</div>';
-  try{
-    const entries = await api('/api/log/'+todayKey());
-    list.innerHTML = '';
-    if(entries.length===0){
-      list.innerHTML = '<div class="empty">Пока пусто — но день ещё не закончен.</div>';
-    } else {
-      entries.forEach(entry=>{
-        const el = document.createElement('div');
-        el.className = 'log-entry';
-        el.textContent = '— '+entry;
-        list.appendChild(el);
-      });
-    }
-  }catch(e){
-    list.innerHTML = '<div class="empty">Не получилось загрузить.</div>';
-  }
-}
-document.getElementById('logAddBtn').addEventListener('click', addLogEntry);
-document.getElementById('logInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter') addLogEntry(); });
-async function addLogEntry(){
-  const input = document.getElementById('logInput');
-  const val = input.value.trim();
-  if(!val) return;
-  try{
-    await api('/api/log/'+todayKey(), { method:'POST', body: JSON.stringify({text:val}) });
-    input.value='';
-    renderLog();
-  }catch(e){}
-}
 
 // ---------- week ----------
 async function renderWeek(){
@@ -566,44 +532,13 @@ async function renderWeek(){
   }
 }
 
-// ---------- reminder ----------
-async function loadReminderSetting(){
-  try{
-    const r = await api('/api/reminder');
-    document.getElementById('reminderTime').value = r.time || '';
-  }catch(e){}
-}
-document.getElementById('reminderSaveBtn').addEventListener('click', async ()=>{
-  const val = document.getElementById('reminderTime').value;
-  const status = document.getElementById('reminderStatus');
-  if(!val){ status.textContent = 'Выбери время, если хочешь тихое напоминание.'; return; }
-  try{
-    await api('/api/reminder', { method:'PUT', body: JSON.stringify({time:val}) });
-    status.textContent = 'Хорошо — тихо напомню в '+val+', пока открыт Flow.';
-  }catch(e){
-    status.textContent = 'Не получилось сохранить.';
-  }
-});
 function showGentleToast(text){
   const toast = document.getElementById('gentleToast');
   toast.textContent = text;
   toast.style.display = 'block';
+  clearTimeout(showGentleToast.timer);
+  showGentleToast.timer = setTimeout(()=>{ toast.style.display = 'none'; }, 5000);
 }
-let lastReminderCheck = null;
-setInterval(async ()=>{
-  if(!token) return;
-  try{
-    const r = await api('/api/reminder');
-    if(!r.time) return;
-    const now = new Date();
-    const current = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
-    const key = todayKey()+current;
-    if(current === r.time && lastReminderCheck !== key){
-      lastReminderCheck = key;
-      showGentleToast('Тихая пауза — можно заглянуть в вечер и посмотреть, что сегодня получилось.');
-    }
-  }catch(e){}
-}, 30000);
 
 // ---------- voice input ----------
 const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;

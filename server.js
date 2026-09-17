@@ -1,11 +1,11 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const low = require('lowdb');
 const FileSync = require('lowdb/adapters/FileSync');
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
 
 function hashPassword(password){
   const salt = crypto.randomBytes(16).toString('hex');
@@ -18,18 +18,35 @@ function verifyPassword(password, stored){
   return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(check, 'hex'));
 }
 
-const adapter = new FileSync(path.join(__dirname, 'db.json'));
+const DATA_DIR = process.env.FLOW_DATA_DIR || path.join(__dirname, 'data');
+fs.mkdirSync(DATA_DIR, { recursive: true });
+const DB_PATH = path.join(DATA_DIR, 'db.json');
+const backupDir = path.join(DATA_DIR, 'backups');
+const legacyDbPath = path.join(__dirname, 'db.json');
+if(!fs.existsSync(DB_PATH) && fs.existsSync(legacyDbPath)) fs.copyFileSync(legacyDbPath, DB_PATH);
+if(fs.existsSync(DB_PATH)){
+  fs.mkdirSync(backupDir, { recursive: true });
+  const backup = path.join(backupDir, `db-${new Date().toISOString().slice(0,10)}.json`);
+  if(!fs.existsSync(backup)) fs.copyFileSync(DB_PATH, backup);
+}
+const adapter = new FileSync(DB_PATH);
 const db = low(adapter);
 db.defaults({ users: [], tasks: [], logs: [], energy: [], shares: [], reminders: [] }).write();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret-in-production';
+const secretFile = path.join(DATA_DIR, '.jwt-secret');
+let JWT_SECRET = (process.env.JWT_SECRET || '').trim();
+if(!JWT_SECRET || /change-this|replace-with/i.test(JWT_SECRET)){
+  JWT_SECRET = fs.existsSync(secretFile) ? fs.readFileSync(secretFile, 'utf8') : crypto.randomBytes(48).toString('hex');
+  if(!fs.existsSync(secretFile)) fs.writeFileSync(secretFile, JWT_SECRET, { mode: 0o600 });
+}
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const PORT = process.env.PORT || 3000;
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.disable('x-powered-by');
+app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.get('/api/health', (_req, res) => res.json({ ok: true, aiConfigured: Boolean(ANTHROPIC_API_KEY && !/your-key|ваш-ключ/i.test(ANTHROPIC_API_KEY)) }));
 
 // ---------- auth helpers ----------
 function sign(userId){
@@ -50,8 +67,11 @@ function auth(req, res, next){
 
 // ---------- auth routes ----------
 app.post('/api/auth/register', (req, res) => {
-  const { email, password, name } = req.body;
-  if(!email || !password) return res.status(400).json({ error: 'Нужны email и пароль' });
+  let { email, password, name } = req.body;
+  email = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  name = typeof name === 'string' ? name.trim().slice(0,80) : '';
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Введите корректный email' });
+  if(typeof password !== 'string' || password.length < 8 || password.length > 128) return res.status(400).json({ error: 'Пароль должен содержать от 8 до 128 символов' });
   const existing = db.get('users').find({ email }).value();
   if(existing) return res.status(409).json({ error: 'Пользователь с таким email уже есть' });
   const user = {
@@ -67,7 +87,8 @@ app.post('/api/auth/register', (req, res) => {
 });
 
 app.post('/api/auth/login', (req, res) => {
-  const { email, password } = req.body;
+  let { email, password } = req.body;
+  email = typeof email === 'string' ? email.trim().toLowerCase() : '';
   const user = db.get('users').find({ email }).value();
   if(!user || !verifyPassword(password, user.passwordHash)){
     return res.status(401).json({ error: 'Неверный email или пароль' });
@@ -115,7 +136,12 @@ app.post('/api/tasks', auth, (req, res) => {
 app.put('/api/tasks/:id', auth, (req, res) => {
   const task = db.get('tasks').find({ id: req.params.id, userId: req.userId }).value();
   if(!task) return res.status(404).json({ error: 'Задача не найдена' });
-  db.get('tasks').find({ id: req.params.id }).assign(req.body).write();
+  const allowed = {};
+  if(typeof req.body.done === 'boolean') allowed.done = req.body.done;
+  if(typeof req.body.title === 'string') allowed.title = req.body.title.trim().slice(0,500);
+  if(['work','home','errands','personal','other'].includes(req.body.context)) allowed.context = req.body.context;
+  if(['low','normal','high'].includes(req.body.urgency)) allowed.urgency = req.body.urgency;
+  db.get('tasks').find({ id: req.params.id, userId: req.userId }).assign(allowed).write();
   res.json({ ok: true });
 });
 
@@ -129,7 +155,9 @@ app.post('/api/tasks/:id/split', auth, async (req, res) => {
   const task = db.get('tasks').find({ id: req.params.id, userId: req.userId }).value();
   if(!task) return res.status(404).json({ error: 'Задача не найдена' });
   try{
-    const steps = await splitWithClaude(task.title);
+    let steps;
+    try { steps = await splitWithClaude(task.title); }
+    catch(e) { steps = localSplit(task.title); }
     db.get('tasks').remove({ id: task.id }).write();
     const newTasks = steps.map(s => ({
       id: crypto.randomUUID(),
@@ -180,9 +208,12 @@ app.post('/api/parse', auth, async (req, res) => {
 });
 
 async function callClaude(systemPrompt, userText, maxTokens){
-  if(!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY не задан на сервере');
+  if(!ANTHROPIC_API_KEY || /your-key|ваш-ключ/i.test(ANTHROPIC_API_KEY)) throw new Error('ANTHROPIC_API_KEY не задан на сервере');
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), 25000);
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
+    signal: controller.signal,
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': ANTHROPIC_API_KEY,
@@ -195,12 +226,20 @@ async function callClaude(systemPrompt, userText, maxTokens){
       messages: [{ role: 'user', content: userText }]
     })
   });
+  clearTimeout(timer);
   const data = await response.json();
   if(data.error) throw new Error(data.error.message || 'Ошибка Claude API');
   const textBlock = data.content.find(b => b.type === 'text');
   let raw = textBlock ? textBlock.text : '[]';
   raw = raw.replace(/```json|```/g, '').trim();
   return JSON.parse(raw);
+}
+
+function localSplit(title){
+  const clean = String(title || '').trim();
+  const parts = clean.split(/[,;]|\s+(?:и затем|затем|потом|после этого|и)\s+/i).map(s=>s.trim()).filter(Boolean);
+  if(parts.length >= 2) return parts.slice(0,4);
+  return [`Подготовиться: ${clean}`, `Начать выполнение: ${clean}`, `Проверить результат: ${clean}`];
 }
 
 async function parseWithClaude(text){
@@ -307,6 +346,19 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`Flow server running on http://localhost:${PORT}`);
-});
+function startServer(port = Number(PORT) || 3000, host = '127.0.0.1'){
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port, host, () => {
+      const actualPort = server.address().port;
+      console.log(`Flow server running on http://${host}:${actualPort}`);
+      resolve({ server, port: actualPort });
+    });
+    server.on('error', reject);
+  });
+}
+
+if(require.main === module){
+  startServer().catch(e=>{ console.error('Не удалось запустить Flow:', e.message); process.exitCode = 1; });
+}
+
+module.exports = { app, startServer };
