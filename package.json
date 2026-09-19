@@ -1,7 +1,7 @@
 {
   "name": "flow-app",
-  "version": "1.2.0",
-  "description": "Flow — adaptive organizer with conversational input",
+  "version": "1.3.7",
+  "description": "Flow — private local adaptive organizer with smart planning",
   "main": "electron-main.js",
   "scripts": {
     "start": "node server.js",
@@ -10,11 +10,11 @@
     "release:win": "electron-builder --win nsis --publish always"
   },
   "dependencies": {
+    "dotenv": "^16.4.5",
+    "electron-updater": "^6.6.2",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
-    "lowdb": "^1.0.0",
-    "dotenv": "^16.4.5",
-    "electron-updater": "^6.6.2"
+    "lowdb": "^1.0.0"
   },
   "devDependencies": {
     "electron": "^38.1.2",
@@ -24,11 +24,39 @@
     "appId": "com.flow.organizer",
     "productName": "Flow",
     "asar": true,
-    "files": ["electron-main.js", "server.js", "package.json", "public/**/*"],
-    "extraResources": [{ "from": "app-update.yml", "to": "app-update.yml" }],
-    "directories": { "output": "dist" },
-    "win": { "target": "nsis", "icon": "public/icons/icon-512.png", "signAndEditExecutable": false },
-    "publish": [{ "provider": "github", "owner": "xyzftf", "repo": "flow-app", "releaseType": "release" }],
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "createStartMenuShortcut": true }
+    "files": [
+      "electron-main.js",
+      "server.js",
+      "package.json",
+      "public/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "app-update.yml",
+        "to": "app-update.yml"
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "public/icons/icon-512.png",
+      "signAndEditExecutable": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "xyzftf",
+        "repo": "flow-app",
+        "releaseType": "release"
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }

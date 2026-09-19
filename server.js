@@ -39,14 +39,13 @@ if(!JWT_SECRET || /change-this|replace-with/i.test(JWT_SECRET)){
   JWT_SECRET = fs.existsSync(secretFile) ? fs.readFileSync(secretFile, 'utf8') : crypto.randomBytes(48).toString('hex');
   if(!fs.existsSync(secretFile)) fs.writeFileSync(secretFile, JWT_SECRET, { mode: 0o600 });
 }
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const PORT = process.env.PORT || 3000;
 
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('/api/health', (_req, res) => res.json({ ok: true, aiConfigured: Boolean(ANTHROPIC_API_KEY && !/your-key|ваш-ключ/i.test(ANTHROPIC_API_KEY)) }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, localPlanner: true, version: '1.3.1' }));
 
 // ---------- auth helpers ----------
 function sign(userId){
@@ -89,6 +88,15 @@ app.post('/api/auth/register', (req, res) => {
 app.post('/api/auth/login', (req, res) => {
   let { email, password } = req.body;
   email = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  // Локальный быстрый вход: admin / admin. Использует существующий профиль, чтобы не терять задачи.
+  if(email === 'admin' && password === 'admin'){
+    let localUser = db.get('users').value()[0];
+    if(!localUser){
+      localUser = { id: crypto.randomUUID(), email:'admin@flow.local', passwordHash:hashPassword('admin'), name:'Admin', createdAt:Date.now() };
+      db.get('users').push(localUser).write();
+    }
+    return res.json({ token: sign(localUser.id), name: localUser.name });
+  }
   const user = db.get('users').find({ email }).value();
   if(!user || !verifyPassword(password, user.passwordHash)){
     return res.status(401).json({ error: 'Неверный email или пароль' });
@@ -108,6 +116,18 @@ app.put('/api/me', auth, (req, res) => {
   const { name } = req.body;
   db.get('users').find({ id: req.userId }).assign({ name: name || '' }).write();
   res.json({ ok: true });
+});
+
+app.get('/api/me/stats', auth, (req, res) => {
+  const tasks = db.get('tasks').filter({ userId:req.userId }).value();
+  const logs = db.get('logs').filter({ userId:req.userId }).value();
+  const today = isoLocal(new Date());
+  const since = new Date(); since.setDate(since.getDate()-6); since.setHours(0,0,0,0);
+  const completedToday = logs.filter(x=>x.date===today).length;
+  const completed7 = logs.filter(x=>new Date(x.date+'T12:00:00')>=since).length;
+  const byContext = {work:0,home:0,errands:0,personal:0,other:0};
+  tasks.filter(t=>!t.done).forEach(t=>{ byContext[t.context||'other']=(byContext[t.context||'other']||0)+1; });
+  res.json({ total:tasks.length, done:tasks.filter(t=>t.done).length, open:tasks.filter(t=>!t.done).length, completedToday, completed7, byContext });
 });
 
 // ---------- tasks ----------
@@ -155,9 +175,10 @@ app.post('/api/tasks/:id/split', auth, async (req, res) => {
   const task = db.get('tasks').find({ id: req.params.id, userId: req.userId }).value();
   if(!task) return res.status(404).json({ error: 'Задача не найдена' });
   try{
-    let steps;
-    try { steps = await splitWithClaude(task.title); }
-    catch(e) { steps = localSplit(task.title); }
+    const steps = localSplit(task.title);
+    if(!Array.isArray(steps) || steps.length < 2){
+      return res.status(422).json({ error: 'В этой задаче пока не вижу нескольких отдельных действий' });
+    }
     db.get('tasks').remove({ id: task.id }).write();
     const newTasks = steps.map(s => ({
       id: crypto.randomUUID(),
@@ -177,88 +198,154 @@ app.post('/api/tasks/:id/split', auth, async (req, res) => {
   }
 });
 
-// ---------- conversational parsing ----------
-app.post('/api/parse', auth, async (req, res) => {
+// ---------- local conversational parsing ----------
+app.post('/api/parse', auth, (req, res) => {
   const { text } = req.body;
-  if(!text) return res.status(400).json({ error: 'Нужен текст' });
-  try{
-    const parsed = await parseWithClaude(text);
-    const tasks = parsed.map(t => ({
-      id: crypto.randomUUID(),
-      userId: req.userId,
-      title: t.title,
-      context: t.context || 'other',
-      urgency: t.urgency || 'normal',
-      due: t.due || null,
-      done: false,
-      createdAt: Date.now()
-    }));
-    tasks.forEach(t => db.get('tasks').push(t).write());
-    res.json(tasks);
-  }catch(e){
-    console.error(e);
-    // graceful fallback: add as single raw task
-    const task = {
-      id: crypto.randomUUID(), userId: req.userId, title: text,
-      context: 'other', urgency: 'normal', due: null, done: false, createdAt: Date.now()
-    };
-    db.get('tasks').push(task).write();
-    res.json([task]);
-  }
+  if(!text || !String(text).trim()) return res.status(400).json({ error: 'Нужен текст' });
+  const parsed = localParseTasks(String(text));
+  const tasks = parsed.map(t => ({
+    id: crypto.randomUUID(), userId: req.userId, title: t.title,
+    context: t.context, urgency: t.urgency, due: t.due,
+    done: false, createdAt: Date.now()
+  }));
+  tasks.forEach(t => db.get('tasks').push(t).write());
+  res.json(tasks);
 });
 
-async function callClaude(systemPrompt, userText, maxTokens){
-  if(!ANTHROPIC_API_KEY || /your-key|ваш-ключ/i.test(ANTHROPIC_API_KEY)) throw new Error('ANTHROPIC_API_KEY не задан на сервере');
-  const controller = new AbortController();
-  const timer = setTimeout(()=>controller.abort(), 25000);
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    signal: controller.signal,
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: maxTokens,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userText }]
-    })
+function isoLocal(d){
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function inferDue(text){
+  const t=text.toLowerCase(), d=new Date(); d.setHours(12,0,0,0);
+  if(/сегодня|до конца дня/.test(t)) return isoLocal(d);
+  if(/завтра/.test(t)){ d.setDate(d.getDate()+1); return isoLocal(d); }
+  if(/послезавтра/.test(t)){ d.setDate(d.getDate()+2); return isoLocal(d); }
+  const days={воскресенье:0,понедельник:1,вторник:2,среду:3,среда:3,четверг:4,пятницу:5,пятница:5,субботу:6,суббота:6};
+  for(const [word,target] of Object.entries(days)) if(t.includes(word)){
+    let add=(target-d.getDay()+7)%7; if(add===0) add=7; d.setDate(d.getDate()+add); return isoLocal(d);
+  }
+  const m=t.match(/(?:до\s*)?(\d{1,2})[.\/-](\d{1,2})(?:[.\/-](\d{2,4}))?/);
+  if(m){ let y=m[3]?Number(m[3]):d.getFullYear(); if(y<100)y+=2000; return `${y}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`; }
+  return null;
+}
+function inferContext(text){
+  const t=text.toLowerCase();
+  if(/убор|убрать|помыть|приготов|дом|квартир|ванн|полк|мебел|стир|комнат|кухн|пылесос|посуд/.test(t)) return 'home';
+  if(/уч[её]б|практич|курсов|экзамен|зач[её]т|универ|лекци|домашн.*задан|проект|отч[её]т|работ|созвон|клиент|коллег|презентац|документ|таблиц/.test(t)) return 'work';
+  if(/магазин|купить|забрать|пункт выдач|пвз|посылк|аптек|заехать|отнести|ателье|получить заказ/.test(t)) return 'errands';
+  if(/врач|спорт|тренир|день рождения|мам|пап|друг|встреча|прогул/.test(t)) return 'personal';
+  return 'other';
+}
+function inferUrgency(text){
+  const t=text.toLowerCase();
+  if(/срочно|важно|сегодня|прямо сейчас|горит|дедлайн/.test(t)) return 'high';
+  if(/когда-нибудь|не срочно|если будет время/.test(t)) return 'low';
+  return 'normal';
+}
+function localParseTasks(text){
+  let chunks=String(text).replace(/\r/g,'\n').split(/\n+|;/i).map(x=>x.trim()).filter(Boolean);
+  if(chunks.length===1 && /\s+и\s+(?=(?:не забыть|забрать|купить|сделать|доделать|позвонить|написать|отправить))/i.test(chunks[0]))
+    chunks=chunks[0].split(/\s+и\s+(?=(?:не забыть|забрать|купить|сделать|доделать|позвонить|написать|отправить))/i);
+  let lastObject='';
+  chunks = chunks.map((raw,i)=>{
+    let title=raw.trim();
+    const obj=title.match(/(?:забрать|купить|получить|отнести)\s+([а-яёa-z-]+(?:\s+[а-яёa-z-]+)?)/i);
+    if(obj) lastObject=obj[1].replace(/\s+(?:в|из|на|для)$/i,'').trim();
+    if(lastObject && i>0){
+      if(/измерить\s+длину(?!\s+[а-яё])/i.test(title)) title=title.replace(/измерить\s+длину/i, 'измерить длину '+lastObject);
+    }
+    return title;
   });
-  clearTimeout(timer);
-  const data = await response.json();
-  if(data.error) throw new Error(data.error.message || 'Ошибка Claude API');
-  const textBlock = data.content.find(b => b.type === 'text');
-  let raw = textBlock ? textBlock.text : '[]';
-  raw = raw.replace(/```json|```/g, '').trim();
-  return JSON.parse(raw);
+  return chunks.slice(0,12).map(title=>({ title:title.trim(), context:inferContext(title), urgency:inferUrgency(title), due:inferDue(title) }));
 }
 
 function localSplit(title){
-  const clean = String(title || '').trim();
-  const parts = clean.split(/[,;]|\s+(?:и затем|затем|потом|после этого|и)\s+/i).map(s=>s.trim()).filter(Boolean);
-  if(parts.length >= 2) return parts.slice(0,4);
-  return [`Подготовиться: ${clean}`, `Начать выполнение: ${clean}`, `Проверить результат: ${clean}`];
+  const clean = String(title || '').trim().replace(/\s+/g,' ');
+  if(!clean) return [];
+
+  // Flow 1.3.6: локальный action/object parser.
+  // Делим по самостоятельным действиям, а затем переносим объект между шагами:
+  // "дойти ... забрать шторы, измерить их длину отнести в ателье"
+  // -> "дойти ... забрать шторы" / "измерить длину штор" / "отнести шторы в ателье".
+  const verbs = ['дойти','дойтись','пойти','сходить','поехать','заехать','забрать','купить','получить','взять','отнести','занести','измерить','замерить','примерить','позвонить','написать','отправить','прибить','повесить','помыть','убрать','сдать','распечатать','проверить','сделать','доделать','подготовить','найти','заказать','записаться','оплатить','вернуть','отдать','загрузить','скачать','прочитать','выучить','собрать'];
+  const verbRe = new RegExp('(?:^|\\s|[,;.!?]\\s*)(' + verbs.join('|') + ')(?=\\s|$)', 'igu');
+  const hits=[]; let m;
+  while((m=verbRe.exec(clean))!==null){
+    const rel=m[0].toLowerCase().lastIndexOf(m[1].toLowerCase());
+    hits.push({ index:m.index+rel, verb:m[1].toLowerCase() });
+  }
+  if(hits.length < 2) return [clean];
+
+  let actions=[];
+  for(let i=0;i<hits.length;i++){
+    const text=clean.slice(hits[i].index, hits[i+1]?.index ?? clean.length)
+      .replace(/^[,;.!?\s]+|[,;.!?\s]+$/g,'')
+      .replace(/\s+(?:и|затем|потом)\s*$/i,'').trim();
+    if(text) actions.push({text, verb:hits[i].verb});
+  }
+
+  // Перемещение к месту + получение предмета = один человеческий шаг.
+  const merged=[];
+  for(let i=0;i<actions.length;i++){
+    const cur=actions[i], next=actions[i+1];
+    if(next && /^(?:дойти|дойтись|пойти|сходить|поехать|заехать)$/.test(cur.verb) && /^(?:забрать|получить|купить|взять)$/.test(next.verb)){
+      merged.push({text:(cur.text+' '+next.text).trim(), verb:cur.verb});
+      i++;
+    } else merged.push(cur);
+  }
+  actions=merged;
+  if(actions.length < 2) return [clean];
+
+  // Запоминаем главный предмет из действия получения/покупки.
+  // Берём существительную группу до границы следующего обстоятельства/пунктуации.
+  let object='';
+  const objMatch=clean.match(/(?:забрать|купить|получить|взять|найти|заказать)\s+([а-яёa-z-]+(?:\s+[а-яёa-z-]+)?)(?=\s*(?:,|;|\.|$|\s+(?:и\s+)?(?:измерить|замерить|примерить|отнести|занести|вернуть|отдать)))/i);
+  if(objMatch) object=objMatch[1].trim();
+  if(!object){
+    const simple=clean.match(/(?:забрать|купить|получить|взять|найти|заказать)\s+([а-яёa-z-]+)/i);
+    if(simple) object=simple[1].trim();
+  }
+
+  const result=actions.map(({text,verb})=>{
+    let x=text.replace(/^(?:и|затем|потом|после этого)\s+/i,'').trim();
+    if(object){
+      // Явная ссылка на уже известный предмет.
+      x=x.replace(/(^|\s)их\s+длину(?=\s|$|[,;.!?])/ig,'$1длину '+object)
+         .replace(/(^|\s)его\s+длину(?=\s|$|[,;.!?])/ig,'$1длину '+object)
+         .replace(/(^|\s)е[её]\s+длину(?=\s|$|[,;.!?])/ig,'$1длину '+object)
+         .replace(/(^|\s)(?:их|его|е[её])(?=\s|$|[,;.!?])/ig,'$1'+object);
+
+      // У действия переноса объект часто опускают: "отнести в ателье".
+      if(/^(?:отнести|занести|отдать|вернуть)\s+(?:в|во|на|к|ко)(?=\s|$)/i.test(x)){
+        x=x.replace(/^((?:отнести|занести|отдать|вернуть))\s+/i,'$1 '+object+' ');
+      }
+    } else {
+      x=x.replace(/(?:^|\s)их\s+длину(?=\s|$|[,;.!?])/ig,'длину').replace(/\bего\s+длину\b/ig,'длину').replace(/\bе[её]\s+длину\b/ig,'длину');
+    }
+    return x.charAt(0).toUpperCase()+x.slice(1);
+  }).filter(Boolean);
+
+  return [...new Set(result)].slice(0,6);
 }
 
-async function parseWithClaude(text){
-  const systemPrompt = `Ты разбираешь свободный текст пользователя на отдельные дела/задачи.
-Верни ТОЛЬКО валидный JSON массив, без пояснений, без markdown.
-Формат каждого элемента: {"title": string, "context": одно из ["work","home","errands","personal","other"], "urgency": одно из ["low","normal","high"], "due": string или null}
-Если в тексте несколько дел — раздели их. Если дело звучит важно/срочно — urgency: "high".`;
-  const parsed = await callClaude(systemPrompt, text, 1000);
-  if(!Array.isArray(parsed)) throw new Error('not an array');
-  return parsed;
-}
-
-async function splitWithClaude(title){
-  const systemPrompt = `Раздели крупную задачу пользователя на 2-4 маленьких конкретных шага.
-Верни ТОЛЬКО валидный JSON массив строк, без пояснений, без markdown.`;
-  const parsed = await callClaude(systemPrompt, title, 500);
-  if(!Array.isArray(parsed)) throw new Error('not an array');
-  return parsed;
-}
+// ---------- local smart planner ----------
+app.get('/api/plan/today', auth, (req, res) => {
+  const date = String(req.query.date || isoLocal(new Date()));
+  const energyRec = db.get('energy').find({ userId:req.userId, date }).value();
+  const energy = energyRec ? energyRec.level : 'normal';
+  const all = db.get('tasks').filter({ userId:req.userId, done:false }).value();
+  const maxItems = energy==='low' ? 2 : energy==='high' ? 5 : 3;
+  const scored = all.map(t=>{
+    let score=t.urgency==='high'?40:t.urgency==='low'?5:20;
+    if(t.due){ const delta=Math.ceil((new Date(t.due+'T12:00:00')-new Date(date+'T12:00:00'))/86400000); if(delta<0)score+=80; else if(delta===0)score+=65; else if(delta===1)score+=45; else if(delta<=3)score+=25; }
+    score += Math.max(0, 10-Math.floor((Date.now()-t.createdAt)/86400000));
+    return {...t, score};
+  }).sort((a,b)=>b.score-a.score || a.createdAt-b.createdAt);
+  const plan=scored.slice(0,maxItems);
+  const message = !plan.length ? 'На сегодня всё свободно.' : energy==='low' ? 'Сил немного — оставил только самое нужное.' : energy==='high' ? 'Энергии много — можно взять чуть больше задач.' : 'Собрал план по важности и срокам.';
+  res.json({ date, energy, message, tasks:plan });
+});
 
 // ---------- energy ----------
 app.get('/api/energy/:date', auth, (req, res) => {

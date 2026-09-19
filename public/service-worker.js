@@ -1,4 +1,4 @@
-const CACHE_NAME = 'flow-cache-v2';
+const CACHE_NAME = 'flow-cache-v132';
 const ASSETS = ['/', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
