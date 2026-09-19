@@ -28,7 +28,7 @@ jobs:
       - name: Verify packaged source
         shell: powershell
         run: |
-          Select-String -Path server.js -Pattern "flow-ai-7181.onrender.com" -SimpleMatch
+          Select-String -Path server.js -Pattern "flow-ai-v2.onrender.com" -SimpleMatch
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Windows installer
@@ -38,7 +38,7 @@ jobs:
         shell: powershell
         run: |
           npx asar extract dist/win-unpacked/resources/app.asar dist/asar-check
-          Select-String -Path dist/asar-check/server.js -Pattern "flow-ai-7181.onrender.com" -SimpleMatch
+          Select-String -Path dist/asar-check/server.js -Pattern "flow-ai-v2.onrender.com" -SimpleMatch
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Show build output
