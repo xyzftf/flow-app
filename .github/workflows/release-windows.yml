@@ -32,9 +32,20 @@ jobs:
         shell: powershell
         run: Get-ChildItem -Path dist -Recurse | Select-Object FullName, Length
 
-      - name: Upload installer to existing v1.3.7 release
+      - name: Create or update GitHub Release
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload v1.3.7 "dist/Flow Setup 1.3.7.exe" "dist/Flow Setup 1.3.7.exe.blockmap" "dist/latest.yml" --clobber
+          $version = node -p "require('./package.json').version"
+          $tag = "v$version"
+          git fetch --tags --force
+          if (-not (git tag -l $tag)) {
+            git tag $tag
+            git push origin $tag
+          }
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $version --notes "Flow $version"
+          }
+          gh release upload $tag "dist/Flow Setup $version.exe" "dist/Flow Setup $version.exe.blockmap" "dist/latest.yml" --clobber
