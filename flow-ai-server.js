@@ -4,6 +4,12 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '16kb' }));
 
+// Temporary request diagnostics: Render logs will show every request that reaches this process.
+app.use((req, res, next) => {
+  console.log('[request]', new Date().toISOString(), req.method, req.originalUrl, 'host='+req.headers.host);
+  next();
+});
+
 const PORT = process.env.PORT || 10000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FLOW_API_TOKEN = process.env.FLOW_API_TOKEN || '';
@@ -17,6 +23,13 @@ function auth(req, res, next){
 
 app.get('/', (req,res)=>res.json({ok:true, service:'Flow AI'}));
 app.get('/health', (req,res)=>res.json({ok:true}));
+app.get('/debug', (req,res)=>res.json({
+  ok:true,
+  service:'Flow AI',
+  path:req.originalUrl,
+  host:req.headers.host,
+  port:PORT
+}));
 
 app.post('/split', auth, async (req,res)=>{
   const title=String(req.body?.title || '').trim().slice(0,1000);
