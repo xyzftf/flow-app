@@ -35,6 +35,7 @@ jobs:
       - name: Upload installer to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ github.event.repository.name == 'flow-app' && '1.3.7' || '1.3.7' }}
           files: |
             dist/*.exe
             dist/*.exe.blockmap
