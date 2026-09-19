@@ -25,7 +25,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and publish release
-        run: npm run release:win
+      - name: Build Windows installer
+        run: npm run dist:win
+
+      - name: Show build output
+        shell: powershell
+        run: Get-ChildItem -Path dist -Recurse | Select-Object FullName, Length
+
+      - name: Upload installer to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
