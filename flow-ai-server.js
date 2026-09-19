@@ -3,12 +3,6 @@ const express = require('express');
 const app = express();
 app.disable('x-powered-by');
 
-// Temporary request diagnostics: log before any body parser.
-app.use((req, res, next) => {
-  console.log('[request]', new Date().toISOString(), req.method, req.originalUrl, 'host='+req.headers.host, 'content-type='+String(req.headers['content-type'] || ''));
-  next();
-});
-
 app.use(express.json({ limit: '16kb' }));
 
 const PORT = process.env.PORT || 10000;
@@ -24,15 +18,6 @@ function auth(req, res, next){
 
 app.get('/', (req,res)=>res.json({ok:true, service:'Flow AI'}));
 app.get('/health', (req,res)=>res.json({ok:true}));
-app.get('/debug', (req,res)=>res.json({
-  ok:true,
-  service:'Flow AI',
-  path:req.originalUrl,
-  host:req.headers.host,
-  port:PORT
-}));
-app.post('/post-test', (req,res)=>res.json({ok:true, method:req.method, body:req.body || null}));
-
 app.post('/split', auth, async (req,res)=>{
   const title=String(req.body?.title || '').trim().slice(0,1000);
   if(!title) return res.status(400).json({error:'Нужен текст задачи'});
@@ -59,9 +44,7 @@ app.post('/split', auth, async (req,res)=>{
       const apiMessage = data?.error?.message || ('OpenAI API HTTP '+response.status);
       const apiCode = data?.error?.code || data?.error?.type || '';
       console.error('split error: OpenAI', response.status, apiCode, apiMessage);
-      return res.status(502).json({
-        error:'OpenAI API: '+response.status+(apiCode ? ' | '+apiCode : '')+' | '+apiMessage
-      });
+      return res.status(502).json({error:'AI-сервис временно недоступен'});
     }
     const text=(data.output||[]).flatMap(x=>x.content||[]).filter(x=>x.type==='output_text').map(x=>x.text||'').join('').trim();
     if(!text){
@@ -75,7 +58,7 @@ app.post('/split', auth, async (req,res)=>{
     res.json({steps:steps.map(x=>String(x).trim()).filter(Boolean).slice(0,7)});
   }catch(e){
     console.error('split error:',e.name,e.message);
-    res.status(502).json({error:'Flow AI: '+e.name+' | '+e.message});
+    res.status(502).json({error:'Не получилось разбить задачу. Попробуй ещё раз'});
   }finally{ clearTimeout(timeout); }
 });
 
