@@ -280,7 +280,7 @@ async function aiSplitTask(title){
         'Authorization':'Bearer '+process.env.OPENAI_API_KEY
       },
       body:JSON.stringify({
-        model: process.env.OPENAI_MODEL || 'gpt-5-mini',
+        model: process.env.OPENAI_MODEL || 'gpt-5.6-luna',
         store:false,
         instructions:'Ты декомпозитор задач в приложении Flow. Разбей пользовательскую задачу на 2-7 конкретных, коротких и выполнимых шагов на русском языке. Сохраняй смысл, объекты и порядок действий. Не добавляй служебные фразы вроде "начать выполнение", "уточнить результат", "проверить результат", если пользователь этого не просил. Не придумывай адреса, сроки или факты. Верни ТОЛЬКО JSON-массив строк без markdown.',
         input:String(title).slice(0,1000),
