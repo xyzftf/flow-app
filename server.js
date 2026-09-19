@@ -270,7 +270,7 @@ function localParseTasks(text){
 }
 
 async function aiSplitTask(title){
-  const backend = String(process.env.FLOW_AI_URL || 'https://flow-ai-7181.onrender.com').replace(/\/$/,'');
+  const backend = 'https://flow-ai-7181.onrender.com';
   const controller = new AbortController();
   const timeout = setTimeout(()=>controller.abort(), 65000);
   try{
