@@ -175,9 +175,17 @@ app.post('/api/tasks/:id/split', auth, async (req, res) => {
   const task = db.get('tasks').find({ id: req.params.id, userId: req.userId }).value();
   if(!task) return res.status(404).json({ error: 'Задача не найдена' });
   try{
-    const steps = localSplit(task.title);
+    let steps = [];
+    if(process.env.OPENAI_API_KEY){
+      try{
+        steps = await aiSplitTask(task.title);
+      }catch(aiError){
+        console.error('AI split failed, using local fallback:', aiError.message);
+      }
+    }
+    if(!Array.isArray(steps) || steps.length < 2) steps = localSplit(task.title);
     if(!Array.isArray(steps) || steps.length < 2){
-      return res.status(422).json({ error: 'В этой задаче пока не вижу нескольких отдельных действий' });
+      return res.status(422).json({ error: process.env.OPENAI_API_KEY ? 'Не получилось разумно разбить эту задачу' : 'Для умного разбиения добавьте OPENAI_API_KEY' });
     }
     db.get('tasks').remove({ id: task.id }).write();
     const newTasks = steps.map(s => ({
@@ -258,6 +266,36 @@ function localParseTasks(text){
     return title;
   });
   return chunks.slice(0,12).map(title=>({ title:title.trim(), context:inferContext(title), urgency:inferUrgency(title), due:inferDue(title) }));
+}
+
+async function aiSplitTask(title){
+  const controller = new AbortController();
+  const timeout = setTimeout(()=>controller.abort(), 20000);
+  try{
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method:'POST',
+      signal:controller.signal,
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization':'Bearer '+process.env.OPENAI_API_KEY
+      },
+      body:JSON.stringify({
+        model: process.env.OPENAI_MODEL || 'gpt-5-mini',
+        store:false,
+        instructions:'Ты декомпозитор задач в приложении Flow. Разбей пользовательскую задачу на 2-7 конкретных, коротких и выполнимых шагов на русском языке. Сохраняй смысл, объекты и порядок действий. Не добавляй служебные фразы вроде "начать выполнение", "уточнить результат", "проверить результат", если пользователь этого не просил. Не придумывай адреса, сроки или факты. Верни ТОЛЬКО JSON-массив строк без markdown.',
+        input:String(title).slice(0,1000),
+        max_output_tokens:300
+      })
+    });
+    const data = await response.json();
+    if(!response.ok) throw new Error(data?.error?.message || 'OpenAI API error '+response.status);
+    const text = data.output_text || (data.output||[]).flatMap(x=>x.content||[]).filter(x=>x.type==='output_text').map(x=>x.text).join('');
+    const parsed=JSON.parse(String(text||'').trim());
+    if(!Array.isArray(parsed)) throw new Error('AI returned invalid steps');
+    return parsed.map(x=>String(x).trim()).filter(Boolean).slice(0,7);
+  }finally{
+    clearTimeout(timeout);
+  }
 }
 
 function localSplit(title){
