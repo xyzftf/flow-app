@@ -44,8 +44,10 @@ jobs:
             git tag $tag
             git push origin $tag
           }
-          gh release view $tag 2>$null
-          if ($LASTEXITCODE -ne 0) {
+          $releaseExists = gh release list --limit 100 --json tagName --jq ".[] | select(.tagName == `"$tag`") | .tagName"
+          if (-not $releaseExists) {
             gh release create $tag --title $version --notes "Flow $version"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           gh release upload $tag "dist/Flow Setup $version.exe" "dist/Flow Setup $version.exe.blockmap" "dist/latest.yml" --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
