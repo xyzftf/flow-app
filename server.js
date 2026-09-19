@@ -281,7 +281,11 @@ async function aiSplitTask(title){
       body:JSON.stringify({title:String(title).slice(0,1000)})
     });
     const data = await response.json().catch(()=>({}));
-    if(!response.ok) throw new Error(data?.error || 'Flow AI '+response.status);
+    if(!response.ok){
+      const finalUrl = response.url || (backend + '/split');
+      const detail = typeof data?.error === 'string' ? data.error : '';
+      throw new Error('HTTP '+response.status+' | '+finalUrl+(detail ? ' | '+detail : ''));
+    }
     if(!Array.isArray(data.steps)) throw new Error('Flow AI returned invalid steps');
     return data.steps.map(x=>String(x).trim()).filter(Boolean).slice(0,7);
   }finally{
