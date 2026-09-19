@@ -180,12 +180,13 @@ app.post('/api/tasks/:id/split', auth, async (req, res) => {
       try{
         steps = await aiSplitTask(task.title);
       }catch(aiError){
-        console.error('AI split failed, using local fallback:', aiError.message);
+        console.error('AI split failed:', aiError.message);
+        return res.status(502).json({ error: 'AI: '+aiError.message });
       }
     }
     if(!Array.isArray(steps) || steps.length < 2) steps = localSplit(task.title);
     if(!Array.isArray(steps) || steps.length < 2){
-      return res.status(422).json({ error: 'Не получилось разумно разбить эту задачу' });
+      return res.status(422).json({ error: 'AI не вернул отдельные шаги' });
     }
     db.get('tasks').remove({ id: task.id }).write();
     const newTasks = steps.map(s => ({
