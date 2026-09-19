@@ -176,7 +176,7 @@ app.post('/api/tasks/:id/split', auth, async (req, res) => {
   if(!task) return res.status(404).json({ error: 'Задача не найдена' });
   try{
     let steps = [];
-    if(process.env.FLOW_AI_URL || 'https://flow-ai-7181.onrender.com'){
+    if(process.env.FLOW_AI_URL || 'https://flow-ai-v2.onrender.com'){
       try{
         steps = await aiSplitTask(task.title);
       }catch(aiError){
@@ -270,7 +270,7 @@ function localParseTasks(text){
 }
 
 async function aiSplitTask(title){
-  const backend = 'https://flow-ai-7181.onrender.com';
+  const backend = 'https://flow-ai-v2.onrender.com';
   const controller = new AbortController();
   const timeout = setTimeout(()=>controller.abort(), 65000);
   try{
