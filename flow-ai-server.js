@@ -2,13 +2,14 @@ const express = require('express');
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '16kb' }));
 
-// Temporary request diagnostics: Render logs will show every request that reaches this process.
+// Temporary request diagnostics: log before any body parser.
 app.use((req, res, next) => {
-  console.log('[request]', new Date().toISOString(), req.method, req.originalUrl, 'host='+req.headers.host);
+  console.log('[request]', new Date().toISOString(), req.method, req.originalUrl, 'host='+req.headers.host, 'content-type='+String(req.headers['content-type'] || ''));
   next();
 });
+
+app.use(express.json({ limit: '16kb' }));
 
 const PORT = process.env.PORT || 10000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -30,6 +31,7 @@ app.get('/debug', (req,res)=>res.json({
   host:req.headers.host,
   port:PORT
 }));
+app.post('/post-test', (req,res)=>res.json({ok:true, method:req.method, body:req.body || null}));
 
 app.post('/split', auth, async (req,res)=>{
   const title=String(req.body?.title || '').trim().slice(0,1000);
