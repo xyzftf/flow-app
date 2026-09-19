@@ -1,13 +1,26 @@
 const { app, BrowserWindow, shell, dialog } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 let server;
 let updatePromptOpen = false;
 const gotLock = app.requestSingleInstanceLock();
 if(!gotLock) app.quit();
 
+function loadWindowsUserApiKey(){
+  if(process.platform !== 'win32' || process.env.OPENAI_API_KEY) return;
+  try{
+    const out = execFileSync('reg', ['query','HKCU\\Environment','/v','OPENAI_API_KEY'], {encoding:'utf8', windowsHide:true});
+    const match = out.match(/OPENAI_API_KEY\s+REG_\w+\s+([^\r\n]+)/i);
+    if(match && match[1]) process.env.OPENAI_API_KEY = match[1].trim();
+  }catch(e){
+    console.log('OPENAI_API_KEY is not configured for this Windows user');
+  }
+}
+
 async function createWindow(){
+  loadWindowsUserApiKey();
   process.env.FLOW_DATA_DIR = path.join(app.getPath('userData'), 'data');
   const { startServer } = require('./server');
   const started = await startServer(32147);
