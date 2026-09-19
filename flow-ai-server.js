@@ -46,11 +46,12 @@ app.post('/split', auth, async (req,res)=>{
       signal:controller.signal,
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+OPENAI_API_KEY},
       body:JSON.stringify({
-        model:process.env.OPENAI_MODEL || 'gpt-5-mini',
+        model:process.env.OPENAI_MODEL || 'gpt-5.6-luna',
+        reasoning:{effort:'none'},
         store:false,
         instructions:'Ты декомпозитор задач в приложении Flow. Разбей задачу на 2-7 конкретных коротких выполнимых шагов на русском языке. Сохраняй смысл, объекты и естественный порядок действий. Не добавляй служебные фразы вроде "начать выполнение", "уточнить результат" или "проверить результат", если пользователь этого не просил. Не придумывай адреса, сроки или факты. Верни ТОЛЬКО JSON-массив строк без markdown.',
         input:title,
-        max_output_tokens:300
+        max_output_tokens:800
       })
     });
     const data=await response.json().catch(()=>({}));
@@ -62,8 +63,14 @@ app.post('/split', auth, async (req,res)=>{
         error:'OpenAI API: '+response.status+(apiCode ? ' | '+apiCode : '')+' | '+apiMessage
       });
     }
-    const text=data.output_text || (data.output||[]).flatMap(x=>x.content||[]).filter(x=>x.type==='output_text').map(x=>x.text).join('');
-    const steps=JSON.parse(String(text||'').trim());
+    const text=(data.output||[]).flatMap(x=>x.content||[]).filter(x=>x.type==='output_text').map(x=>x.text||'').join('').trim();
+    if(!text){
+      const status=data.status || 'unknown';
+      const reason=data.incomplete_details?.reason || 'no_output_text';
+      throw new Error('Пустой ответ OpenAI: '+status+' | '+reason);
+    }
+    const cleaned=text.replace(/^```(?:json)?\\s*/i,'').replace(/```$/,'').trim();
+    const steps=JSON.parse(cleaned);
     if(!Array.isArray(steps) || steps.length<2) throw new Error('Некорректный ответ модели');
     res.json({steps:steps.map(x=>String(x).trim()).filter(Boolean).slice(0,7)});
   }catch(e){
