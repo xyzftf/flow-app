@@ -72,7 +72,7 @@ jobs:
             gh release create $tag --draft --title "Flow $version" --notes-file RELEASE_NOTES.md
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-          gh release upload $tag "dist/Flow Setup $version.exe" "dist/Flow Setup $version.exe.blockmap" "dist/latest.yml"
+          gh release upload $tag "dist/Flow-Setup-$version.exe" "dist/Flow-Setup-$version.exe.blockmap" "dist/latest.yml"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           gh release edit $tag --draft=false
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
