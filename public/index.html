@@ -139,6 +139,20 @@
   #smartPlanList .task{flex-wrap:wrap;}
   button:disabled{opacity:.5;cursor:default;}
 
+  .profile-identity{display:flex;gap:16px;align-items:center;margin:16px 0;}
+  .profile-identity h2{margin:0 0 6px;font-size:26px;}
+  .profile-avatar{width:58px;height:58px;flex-shrink:0;border-radius:50%;background:var(--moss);color:#fff;display:grid;place-items:center;font-size:22px;}
+  .profile-form{display:grid;gap:10px;margin-top:20px;}
+  .profile-form input,.profile-form textarea,.deadline-editor input{background:var(--card);color:var(--ink);border:1px solid var(--line);padding:10px;border-radius:10px;font:inherit;box-sizing:border-box;max-width:100%;}
+  .profile-form textarea{min-height:76px;resize:vertical;}
+  .profile-progress{margin-top:20px;} .profile-progress progress{width:100%;height:12px;margin-top:8px;accent-color:var(--moss);}
+  .profile-deadline{display:flex;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid var(--line);}
+  .profile-deadline span:first-child{overflow-wrap:anywhere;}
+  .task-action{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;font-size:12px;cursor:pointer;}
+  .task-action:hover{border-color:var(--moss);} .delete-task,.overdue{color:#a13d3d;}
+  .evening-theme .delete-task,.evening-theme .overdue{color:#ffb7ac;}
+  .deadline-editor{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:12px;}
+  .deadline-editor label{display:flex;flex-direction:column;gap:6px;font-size:12px;}
 </style>
 </head>
 <body>
@@ -175,7 +189,6 @@
     <div class="tab active" data-tab="today">Сегодня</div>
     <div class="tab" data-tab="all">Все дела</div>
     <div class="tab" data-tab="week">Неделя</div>
-    <div class="tab" id="themeToggle" data-theme-toggle="true">Вечерний фон</div>
     <div class="tab" data-tab="profile">Профиль</div>
   </div>
 
@@ -265,13 +278,18 @@
   <div id="tab-profile" style="display:none;">
     <div class="card">
       <div class="section-label" style="margin-top:0;">Профиль · Flow <span id="flowVersion"></span></div>
-      <div style="font-family:'Cormorant Garamond',serif;font-size:28px;margin:8px 0 4px;" id="profileHello">Мой Flow</div>
+      <div class="profile-identity"><div class="profile-avatar" id="profileAvatar" aria-hidden="true">F</div><div><h2 id="profileHello">Мой Flow</h2><div class="hint" id="profileEmail"></div><div class="hint" id="profileJoined"></div></div></div>
       <div class="hint">Здесь Flow показывает реальную картину по вашим задачам. Статистика обновляется при открытии профиля.</div>
       <div class="log-input-row" style="margin-top:16px;">
         <input type="text" id="profileNameInput" placeholder="Как к вам обращаться" style="flex:1;">
         <button class="primary" id="profileNameSaveBtn">Сохранить имя</button>
       </div>
-      <div class="status" id="profileNameStatus"></div>
+      <div class="status" id="profileNameStatus" role="status"></div>
+      <form id="profileDetailsForm" class="profile-form">
+        <label for="profileBio">О себе</label><textarea id="profileBio" maxlength="300" placeholder="Чем занимаешься, что для тебя важно"></textarea>
+        <label for="profileFocus">Мой текущий фокус</label><input id="profileFocus" maxlength="120" placeholder="Например: закончить учебный проект">
+        <button class="primary" type="submit">Сохранить профиль</button><div class="status" id="profileDetailsStatus" role="status"></div>
+      </form>
     </div>
     <div class="card">
       <div class="section-label" style="margin-top:0;">Моя статистика</div>
@@ -281,6 +299,7 @@
         <div class="stat-box"><div class="stat-num" id="statToday">0</div><div class="stat-label">сделано сегодня</div></div>
         <div class="stat-box"><div class="stat-num" id="statWeek">0</div><div class="stat-label">за последние 7 дней</div></div>
       </div>
+      <div class="profile-progress"><div class="hint" id="profileProgressLabel"></div><progress id="profileProgress" max="100" value="0" aria-label="Доля выполненных задач"></progress></div>
       <div class="section-label" style="margin-top:22px;">Сейчас в списке</div>
       <div class="context-stats" id="contextStats"><div class="status">Считаю задачи…</div></div>
     </div>
@@ -288,6 +307,8 @@
       <div class="section-label" style="margin-top:0;">Flow</div>
       <div class="hint" id="profileSummary">Добавьте несколько задач — здесь появится краткая сводка.</div>
     </div>
+    <div class="card"><div class="section-label" style="margin-top:0;">Ближайшие дедлайны</div><div id="profileDeadlines"></div></div>
+    <div class="card"><div class="section-label" style="margin-top:0;">Настройки</div><p class="hint">Вечерняя тема сохраняется после перезапуска.</p><button class="primary" id="themeToggle" type="button" aria-pressed="false">Включить вечернюю тему</button></div>
     <div class="card">
       <button class="primary" id="logoutBtn" style="background:var(--card); color:var(--ink); border:1px solid var(--line);">Выйти из аккаунта</button>
     </div>
@@ -302,7 +323,7 @@ let darkTheme = localStorage.getItem('flowTheme') === 'dark';
 function applyTheme(){
   document.body.classList.toggle('evening-theme', darkTheme);
   const toggle = document.getElementById('themeToggle');
-  if(toggle) toggle.textContent = darkTheme ? 'Светлый фон' : 'Вечерний фон';
+  if(toggle){ toggle.textContent = darkTheme ? 'Вечерняя тема включена' : 'Включить вечернюю тему'; toggle.setAttribute('aria-pressed',String(darkTheme)); }
 }
 applyTheme();
 
@@ -376,7 +397,6 @@ async function startApp(){
   document.getElementById('dateTag').textContent = formatDateHeader();
   renderCalmCard();
   await initGreeting();
-loadProfileStats();
   await loadEnergy();
   await loadTasks();
   render();
@@ -384,20 +404,20 @@ loadProfileStats();
 }
 
 async function loadTasks(){
-  try{ tasks = await api('/api/tasks'); }catch(e){ tasks = []; }
+  try{ const loaded=await api('/api/tasks'); tasks=loaded.map(item=>Object.assign(tasks.find(t=>t.id===item.id)||{},item)); }catch(e){ showGentleToast(e.message); }
 }
 async function loadEnergy(){
   try{
     const r = await api('/api/energy/'+todayKey());
     energyLevel = r.level;
-    document.querySelectorAll('.energy-btn').forEach(b=>b.classList.toggle('selected', b.dataset.energy===energyLevel));
+    document.querySelectorAll('[data-energy]').forEach(b=>b.classList.toggle('selected', b.dataset.energy===energyLevel));
     document.getElementById('energyBlob').className = 'blob '+energyLevel;
   }catch(e){ energyLevel = 'normal'; }
 }
 
-document.querySelectorAll('.energy-btn').forEach(btn=>{
+document.querySelectorAll('[data-energy]').forEach(btn=>{
   btn.addEventListener('click', async ()=>{
-    document.querySelectorAll('.energy-btn').forEach(b=>b.classList.remove('selected'));
+    document.querySelectorAll('[data-energy]').forEach(b=>b.classList.remove('selected'));
     btn.classList.add('selected');
     energyLevel = btn.dataset.energy;
     document.getElementById('energyBlob').className = 'blob '+energyLevel;
@@ -407,18 +427,14 @@ document.querySelectorAll('.energy-btn').forEach(btn=>{
   });
 });
 
+document.getElementById('themeToggle').onclick=()=>{ darkTheme=!darkTheme;localStorage.setItem('flowTheme',darkTheme?'dark':'light');applyTheme(); };
+
 // ---------- tabs ----------
 document.querySelectorAll('.tab').forEach(tab=>{
   tab.addEventListener('click', ()=>{
-    if(tab.dataset.themeToggle){
-      darkTheme = !darkTheme;
-      localStorage.setItem('flowTheme', darkTheme ? 'dark' : 'light');
-      applyTheme();
-      return;
-    }
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
     tab.classList.add('active');
-    ['today','all','week','evening','profile'].forEach(name=>{
+    ['today','all','week','profile'].forEach(name=>{
       document.getElementById('tab-'+name).style.display = (name===tab.dataset.tab) ? 'block' : 'none';
     });
     if(tab.dataset.tab === 'all') renderFullList();
@@ -552,7 +568,6 @@ function renderTask(t){
       <div class="task-title ${t.done?'done':''}">${escapeHtml(t.title)}</div>
       <div class="task-meta">
         <span class="pill context-pill" data-context-edit="1">${contextLabel(t.context)}</span>
-        ${t.due ? `<span class="pill">${escapeHtml(t.due)}</span>` : ''}
         ${t.urgency==='high' ? `<span class="pill urgent">важно</span>` : ''}
         ${!t.done ? `<span class="split-link">шаги локально</span>` : ''}
       </div>
@@ -621,18 +636,49 @@ function renderTask(t){
       select.addEventListener('click', e=>e.stopPropagation());
     });
   }
+  const deadline=document.createElement('button');deadline.className='task-action deadline-button';
+  deadline.textContent=t.due ? 'Дедлайн: '+formatDue(t.due) : '＋ Дедлайн';
+  deadline.classList.toggle('overdue',Boolean(t.due && t.due<todayKey() && !t.done));
+  deadline.onclick=ev=>{
+    ev.stopPropagation();
+    const existing=el.querySelector('.deadline-editor');if(existing){existing.remove();return;}
+    const form=document.createElement('form');form.className='deadline-editor';
+    const label=document.createElement('label');label.textContent='Дата дедлайна (необязательно)';
+    const input=document.createElement('input');input.type='date';input.value=t.due||'';label.appendChild(input);form.appendChild(label);
+    const save=document.createElement('button');save.type='submit';save.className='task-action';save.textContent='Сохранить';form.appendChild(save);
+    const clear=document.createElement('button');clear.type='button';clear.className='task-action';clear.textContent='Без дедлайна';form.appendChild(clear);
+    const cancel=document.createElement('button');cancel.type='button';cancel.className='task-action';cancel.textContent='Отмена';cancel.onclick=()=>form.remove();form.appendChild(cancel);
+    form.onclick=e=>e.stopPropagation();
+    const update=async due=>{
+      form.querySelectorAll('button').forEach(b=>b.disabled=true);
+      try{await api('/api/tasks/'+t.id,{method:'PUT',body:JSON.stringify({due})});t.due=due;render();renderFullList();loadSmartPlan();}
+      catch(e){showGentleToast(e.message);form.querySelectorAll('button').forEach(b=>b.disabled=false);}
+    };
+    form.onsubmit=e=>{e.preventDefault();update(input.value||null);};clear.onclick=()=>update(null);
+    el.querySelector('.task-body').appendChild(form);input.focus();
+  };
+  el.querySelector('.task-meta').appendChild(deadline);
+  const remove=document.createElement('button');remove.className='task-action delete-task';remove.textContent='Удалить';
+  remove.setAttribute('aria-label','Удалить задачу: '+t.title);
+  remove.onclick=async ev=>{
+    ev.stopPropagation();if(!confirm('Удалить задачу «'+t.title+'»?')) return;
+    remove.disabled=true;
+    try{await api('/api/tasks/'+t.id,{method:'DELETE'});tasks=tasks.filter(x=>x.id!==t.id);render();renderFullList();await loadSmartPlan();}
+    catch(e){showGentleToast(e.message);remove.disabled=false;}
+  };
+  el.querySelector('.task-meta').appendChild(remove);
   const edit = document.createElement('button');
   edit.textContent = 'Изменить'; edit.className='energy-btn';
   edit.onclick = ev=>{
     ev.stopPropagation();
     if(el.querySelector('.task-editor')) return;
     const form=document.createElement('form'); form.className='task-editor';
-    form.innerHTML='<label>Название <input name="title" maxlength="500" required></label> <label>Категория <select name="context"><option value="home">Дом</option><option value="work">Работа / учёба</option><option value="errands">Поручения</option><option value="personal">Личное</option><option value="other">Разное</option></select></label> <label>Приоритет <select name="urgency"><option value="low">Низкий</option><option value="normal">Обычный</option><option value="high">Высокий</option></select></label> <label>Срок <input type="date" name="due"></label> <button type="submit" class="energy-btn">Сохранить</button> <button type="button" class="energy-btn">Отмена</button>';
+    form.innerHTML='<label>Название <input name="title" maxlength="500" required></label> <label>Категория <select name="context"><option value="home">Дом</option><option value="work">Работа / учёба</option><option value="errands">Поручения</option><option value="personal">Личное</option><option value="other">Разное</option></select></label> <label>Приоритет <select name="urgency"><option value="low">Низкий</option><option value="normal">Обычный</option><option value="high">Высокий</option></select></label> <button type="submit" class="energy-btn">Сохранить</button> <button type="button" class="energy-btn">Отмена</button>';
     form.addEventListener('click',e=>e.stopPropagation());
-    for(const key of ['title','context','urgency','due']) form.elements[key].value=t[key]||'';
+    for(const key of ['title','context','urgency']) form.elements[key].value=t[key]||'';
     form.querySelector('[type="button"]').onclick=()=>form.remove();
     form.onsubmit=async e=>{
-      e.preventDefault(); const values=Object.fromEntries(new FormData(form)); values.title=values.title.trim(); values.due=values.due||null;
+      e.preventDefault(); const values=Object.fromEntries(new FormData(form)); values.title=values.title.trim();
       if(!values.title) return;
       try{ await api('/api/tasks/'+t.id,{method:'PUT',body:JSON.stringify(values)}); Object.assign(t,values); render(); renderFullList(); loadSmartPlan(); }
       catch(err){showGentleToast(err.message);}
@@ -769,6 +815,25 @@ const calmPhrases = [
 function dayOfYear(){ const now = new Date(); const start = new Date(now.getFullYear(), 0, 0); return Math.floor((now-start)/86400000); }
 function renderCalmCard(){ document.getElementById('calmText').textContent = calmPhrases[dayOfYear() % calmPhrases.length]; }
 
+function formatDue(date){ return new Date(date+'T12:00:00').toLocaleDateString('ru-RU'); }
+function renderProfileDeadlines(){
+  const list=document.getElementById('profileDeadlines');list.replaceChildren();
+  const upcoming=tasks.filter(t=>!t.done&&t.due).sort((a,b)=>a.due.localeCompare(b.due));
+  if(!upcoming.length){list.textContent='Дедлайнов нет. Их можно добавить кнопкой у любой задачи.';return;}
+  upcoming.slice(0,5).forEach(t=>{
+    const row=document.createElement('div');row.className='profile-deadline';
+    const title=document.createElement('span');title.textContent=t.title;
+    const due=document.createElement('span');due.textContent=(t.due<todayKey()?'Просрочено · ':t.due===todayKey()?'Сегодня · ':'')+formatDue(t.due);
+    due.className=t.due<todayKey()?'overdue':'hint';row.append(title,due);list.appendChild(row);
+  });
+}
+document.getElementById('profileDetailsForm').onsubmit=async ev=>{
+  ev.preventDefault();const button=ev.currentTarget.querySelector('button');button.disabled=true;
+  const status=document.getElementById('profileDetailsStatus');
+  try{await api('/api/me',{method:'PUT',body:JSON.stringify({bio:document.getElementById('profileBio').value,focus:document.getElementById('profileFocus').value})});status.textContent='Профиль сохранён.';}
+  catch(e){status.textContent=e.message;}finally{button.disabled=false;}
+};
+
 // ---------- profile / greeting ----------
 function applyGreeting(name){
   const subtitle = document.getElementById('heroSubtitle');
@@ -787,7 +852,11 @@ async function initGreeting(){
 async function loadProfileName(){
   try { const health=await api('/api/health'); document.getElementById('flowVersion').textContent=health.version; } catch(e) {}
 
-  try{ const me = await api('/api/me'); document.getElementById('profileNameInput').value = me.name || ''; document.getElementById('profileHello').textContent = me.name ? me.name : 'Мой Flow'; }
+  try{ const me = await api('/api/me'); document.getElementById('profileNameInput').value = me.name || ''; document.getElementById('profileHello').textContent = me.name || 'Мой Flow';
+    document.getElementById('profileAvatar').textContent=(me.name||'Flow').trim().split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase();
+    document.getElementById('profileEmail').textContent=me.email||'';
+    document.getElementById('profileJoined').textContent=me.createdAt ? 'С Flow с '+new Date(me.createdAt).toLocaleDateString('ru-RU') : '';
+    document.getElementById('profileBio').value=me.bio||'';document.getElementById('profileFocus').value=me.focus||''; }
   catch(e){}
 }
 async function loadProfileStats(){
@@ -799,6 +868,11 @@ async function loadProfileStats(){
     tasks.filter(t=>!t.done).forEach(t=>{ const k=t.context||'other'; byContext[k]=(byContext[k]||0)+1; });
     s={open:tasks.filter(t=>!t.done).length,done:tasks.filter(t=>t.done).length,completedToday:0,completed7:0,byContext};
   }
+  await loadTasks();
+  renderProfileDeadlines();
+  const count=tasks.length, completed=tasks.filter(t=>t.done).length;
+  document.getElementById('profileProgress').value=count?Math.round(completed/count*100):0;
+  document.getElementById('profileProgressLabel').textContent=count ? `Выполнено ${completed} из ${count} задач в текущем списке` : 'Добавь первую задачу — здесь появится прогресс.';
   document.getElementById('statOpen').textContent=s.open||0;
   document.getElementById('statDone').textContent=s.done||0;
   document.getElementById('statToday').textContent=s.completedToday||0;
@@ -815,6 +889,8 @@ document.getElementById('profileNameSaveBtn').addEventListener('click', async ()
   try{
     await api('/api/me', { method:'PUT', body: JSON.stringify({name}) });
     applyGreeting(name);
+    document.getElementById('profileHello').textContent=name;
+    document.getElementById('profileAvatar').textContent=name.split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase();
     status.textContent = 'Сохранено.';
   }catch(e){
     status.textContent = 'Не получилось сохранить.';

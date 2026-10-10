@@ -110,12 +110,18 @@ app.post('/api/auth/login', (req, res) => {
 app.get('/api/me', auth, (req, res) => {
   const user = db.get('users').find({ id: req.userId }).value();
   if(!user) return res.status(404).json({ error: 'Пользователь не найден' });
-  res.json({ name: user.name, email: user.email });
+  res.json({ name: user.name, email: user.email, createdAt: user.createdAt, bio: user.bio || "", focus: user.focus || "" });
 });
 
 app.put('/api/me', auth, (req, res) => {
-  const { name } = req.body;
-  db.get('users').find({ id: req.userId }).assign({ name: name || '' }).write();
+  const fields={};
+  for(const [key,max] of [['name',80],['bio',300],['focus',120]]){
+    if(key in req.body){
+      if(typeof req.body[key] !== 'string' || req.body[key].length>max) return res.status(400).json({error:'Проверьте длину полей профиля'});
+      fields[key]=req.body[key].trim();
+    }
+  }
+  db.get('users').find({ id: req.userId }).assign(fields).write();
   res.json({ ok: true });
 });
 
@@ -174,7 +180,14 @@ app.put('/api/tasks/:id', auth, (req, res) => {
 });
 
 app.delete('/api/tasks/:id', auth, (req, res) => {
-  db.get('tasks').remove({ id: req.params.id, userId: req.userId }).write();
+  const task=db.get('tasks').find({id:req.params.id,userId:req.userId}).value();
+  if(!task) return res.status(404).json({error:'Задача не найдена'});
+  db.set('tasks',db.get('tasks').value().filter(t=>t.id!==task.id)).value();
+  db.get('plans').filter({userId:req.userId}).value().forEach(plan=>{
+    plan.ids=(plan.ids||[]).filter(id=>id!==task.id);
+    if(plan.reasons) delete plan.reasons[task.id];
+  });
+  db.write();
   res.json({ ok: true });
 });
 
