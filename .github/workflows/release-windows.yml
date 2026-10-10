@@ -3,11 +3,17 @@ name: Release Flow for Windows
 on:
   workflow_dispatch:
   push:
+    branches: [main]
+    paths: [package.json]
     tags:
       - "v*"
 
 permissions:
   contents: write
+
+concurrency:
+  group: flow-windows-release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -24,6 +30,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Test
+        run: npm test
 
       - name: Verify packaged source
         shell: powershell
@@ -57,10 +66,13 @@ jobs:
             git tag $tag
             git push origin $tag
           }
+          if ((git rev-list -n 1 $tag) -ne (git rev-parse HEAD)) { throw "Tag points to another commit" }
           $releaseExists = gh release list --limit 100 --json tagName --jq ".[] | select(.tagName == `"$tag`") | .tagName"
           if (-not $releaseExists) {
-            gh release create $tag --title $version --notes "Flow $version"
+            gh release create $tag --draft --title "Flow $version" --notes-file RELEASE_NOTES.md
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-          gh release upload $tag "dist/Flow Setup $version.exe" "dist/Flow Setup $version.exe.blockmap" "dist/latest.yml" --clobber
+          gh release upload $tag "dist/Flow Setup $version.exe" "dist/Flow Setup $version.exe.blockmap" "dist/latest.yml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release edit $tag --draft=false
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

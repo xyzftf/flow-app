@@ -134,6 +134,11 @@
   .auth-field input{ width:100%; padding:12px; }
   .auth-switch{ font-size:13px; color:var(--moss-deep); cursor:pointer; margin-top:14px; text-align:center; }
   #app{ display:none; }
+  .task-editor{display:flex;flex-direction:column;gap:10px;margin-top:12px;}
+  .task-editor input,.task-editor select{background:var(--card);color:var(--ink);border:1px solid var(--line);padding:8px;border-radius:8px;max-width:100%;}
+  #smartPlanList .task{flex-wrap:wrap;}
+  button:disabled{opacity:.5;cursor:default;}
+
 </style>
 </head>
 <body>
@@ -226,7 +231,7 @@
 
     <div class="card" id="smartPlanCard">
       <div class="plan-head"><div><div class="plan-title">План на сегодня</div><div class="plan-note" id="planNote">Собираю план по важности и срокам…</div></div></div>
-      <div id="smartPlanList"></div>
+      <p class="hint">План составляется локально. После изменения задач или уровня сил нажмите «Перестроить».</p><button class="primary" id="planBuild">Составить / перестроить</button><div id="smartPlanList"></div>
     </div>
 
     <div class="section-label">На сейчас</div>
@@ -357,7 +362,7 @@ function logout(){
 }
 
 // ---------- date ----------
-function todayKey(){ return new Date().toISOString().slice(0,10); }
+function todayKey(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function formatDateHeader(){ return new Date().toLocaleDateString('ru-RU', {weekday:'long', day:'numeric', month:'long'}); }
 
 let tasks = [];
@@ -472,18 +477,47 @@ function render(){
   }
 }
 
+let dailyPlan={ids:[]};
+let planRequest=0;
 async function loadSmartPlan(){
-  const list=document.getElementById('smartPlanList'), note=document.getElementById('planNote');
+ const request=++planRequest;
+ try{
+  const plan=await api('/api/plan/'+todayKey());
+  if(request!==planRequest) return;
+  dailyPlan=plan;
+  document.getElementById('planNote').textContent='Сохранённый план. Порядок можно изменить стрелками.';
+  renderPlan();
+ }catch(e){document.getElementById('planNote').textContent=e.message;}
+}
+document.getElementById('planBuild').onclick=async function(){
+  this.disabled=true;
   try{
-    const plan=await api('/api/plan/today?date='+todayKey());
-    note.textContent=plan.message;
-    list.innerHTML='';
-    plan.tasks.forEach((t,i)=>{
-      const row=document.createElement('div'); row.className='plan-row';
-      row.innerHTML=`<div class="plan-num">${String(i+1).padStart(2,'0')}</div><div><div>${escapeHtml(t.title)}</div><div class="hint" style="margin-top:3px;">${t.due ? 'до '+escapeHtml(t.due) : contextLabel(t.context)}</div></div>`;
-      list.appendChild(row);
-    });
-  }catch(e){ note.textContent='План появится после добавления задач.'; list.innerHTML=''; }
+    dailyPlan=await api('/api/plan/'+todayKey(),{method:'POST'});
+    document.getElementById('planNote').textContent='План сохранён. Можно изменить порядок стрелками или убрать дело из плана.';
+    renderPlan();
+  } catch(e){showGentleToast(e.message);} finally{this.disabled=false;}
+};
+function renderPlan(){
+  const list=document.getElementById('smartPlanList'); list.replaceChildren();
+  const ids=(dailyPlan.ids||[]).filter(id=>tasks.some(t=>t.id===id&&!t.done));
+  if(!ids.length){ list.textContent='Нет запланированных дел. Нажми кнопку, чтобы выбрать задачи.'; return; }
+  ids.forEach((id,index)=>{
+    const task=tasks.find(t=>t.id===id);
+    const row=document.createElement('div'); row.className='task';
+    const text=document.createElement('span'); text.style.flex='1';
+    text.textContent=`${index+1}. ${task.title}`; row.appendChild(text);
+    for(const [label,action,disabled] of [['↑',-1,index===0],['↓',1,index===ids.length-1],['Убрать',0,false]]){
+      const button=document.createElement('button'); button.className='energy-btn'; button.textContent=label; button.disabled=disabled;
+      button.setAttribute('aria-label',label+' — '+task.title);
+      button.onclick=async()=>{
+        const updated=[...ids]; if(action===0) updated.splice(index,1); else [updated[index],updated[index+action]]=[updated[index+action],updated[index]];
+        list.querySelectorAll('button').forEach(b=>b.disabled=true);
+        try{await api('/api/plan/'+todayKey(),{method:'PUT',body:JSON.stringify({ids:updated})});dailyPlan.ids=updated;}
+        catch(e){showGentleToast(e.message);} finally{renderPlan();}
+      }; row.appendChild(button);
+    }
+    list.appendChild(row);
+  });
 }
 
 document.querySelectorAll('.filter-chip').forEach(chip=>{
@@ -520,12 +554,12 @@ function renderTask(t){
         <span class="pill context-pill" data-context-edit="1">${contextLabel(t.context)}</span>
         ${t.due ? `<span class="pill">${escapeHtml(t.due)}</span>` : ''}
         ${t.urgency==='high' ? `<span class="pill urgent">важно</span>` : ''}
-        ${!t.done ? `<span class="split-link">разбить на шаги</span>` : ''}
+        ${!t.done ? `<span class="split-link">шаги локально</span>` : ''}
       </div>
     </div>
   `;
   el.addEventListener('click', async (ev)=>{
-    if(ev.target.classList.contains('split-link') || ev.target.closest('.context-select') || ev.target.classList.contains('context-pill')) return;
+    if(ev.target.closest('button, input, select, .task-editor') || ev.target.classList.contains('split-link') || ev.target.closest('.context-select') || ev.target.classList.contains('context-pill')) return;
     const previous = t.done;
     t.done = !t.done;
     try{
@@ -551,9 +585,22 @@ function renderTask(t){
         renderFullList();
         loadSmartPlan();
       }catch(e){
-        splitLink.textContent = (e && e.message) ? e.message : 'не получилось, попробуй ещё раз';
+        splitLink.textContent = 'шаги локально'; showGentleToast(e.message);
       }
     });
+  }
+  if(!t.done){
+    const online=document.createElement('button'); online.className='energy-btn'; online.textContent='ИИ онлайн';
+    online.onclick=async ev=>{
+      ev.stopPropagation();
+      if(!confirm('Отправить текст этой задачи во внешний ИИ-сервис для разбиения?')) return;
+      online.disabled=true;
+      try{
+        const steps=await api('/api/tasks/'+t.id+'/split',{method:'POST',body:JSON.stringify({mode:'cloud'})});
+        tasks=tasks.filter(x=>x.id!==t.id).concat(steps);render();renderFullList();loadSmartPlan();
+      }catch(e){showGentleToast(e.message);}finally{online.disabled=false;}
+    };
+    el.querySelector('.task-meta').appendChild(online);
   }
   const contextPill = el.querySelector('.context-pill');
   if(contextPill){
@@ -574,6 +621,25 @@ function renderTask(t){
       select.addEventListener('click', e=>e.stopPropagation());
     });
   }
+  const edit = document.createElement('button');
+  edit.textContent = 'Изменить'; edit.className='energy-btn';
+  edit.onclick = ev=>{
+    ev.stopPropagation();
+    if(el.querySelector('.task-editor')) return;
+    const form=document.createElement('form'); form.className='task-editor';
+    form.innerHTML='<label>Название <input name="title" maxlength="500" required></label> <label>Категория <select name="context"><option value="home">Дом</option><option value="work">Работа / учёба</option><option value="errands">Поручения</option><option value="personal">Личное</option><option value="other">Разное</option></select></label> <label>Приоритет <select name="urgency"><option value="low">Низкий</option><option value="normal">Обычный</option><option value="high">Высокий</option></select></label> <label>Срок <input type="date" name="due"></label> <button type="submit" class="energy-btn">Сохранить</button> <button type="button" class="energy-btn">Отмена</button>';
+    form.addEventListener('click',e=>e.stopPropagation());
+    for(const key of ['title','context','urgency','due']) form.elements[key].value=t[key]||'';
+    form.querySelector('[type="button"]').onclick=()=>form.remove();
+    form.onsubmit=async e=>{
+      e.preventDefault(); const values=Object.fromEntries(new FormData(form)); values.title=values.title.trim(); values.due=values.due||null;
+      if(!values.title) return;
+      try{ await api('/api/tasks/'+t.id,{method:'PUT',body:JSON.stringify(values)}); Object.assign(t,values); render(); renderFullList(); loadSmartPlan(); }
+      catch(err){showGentleToast(err.message);}
+    };
+    el.querySelector('.task-body').appendChild(form);
+  };
+  el.querySelector('.task-meta').appendChild(edit);
   return el;
 }
 

@@ -6,6 +6,7 @@ const FileSync = require('lowdb/adapters/FileSync');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
+const { splitLocal, makePlan } = require('./planner');
 
 function hashPassword(password){
   const salt = crypto.randomBytes(16).toString('hex');
@@ -31,7 +32,7 @@ if(fs.existsSync(DB_PATH)){
 }
 const adapter = new FileSync(DB_PATH);
 const db = low(adapter);
-db.defaults({ users: [], tasks: [], logs: [], energy: [], shares: [], reminders: [] }).write();
+db.defaults({ users: [], tasks: [], logs: [], energy: [], shares: [], reminders: [], plans: [] }).write();
 
 const secretFile = path.join(DATA_DIR, '.jwt-secret');
 let JWT_SECRET = (process.env.JWT_SECRET || '').trim();
@@ -45,7 +46,7 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('/api/health', (_req, res) => res.json({ ok: true, localPlanner: true, version: '1.3.1' }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, localPlanner: true, version: require('./package.json').version }));
 
 // ---------- auth helpers ----------
 function sign(userId){
@@ -158,9 +159,16 @@ app.put('/api/tasks/:id', auth, (req, res) => {
   if(!task) return res.status(404).json({ error: 'Задача не найдена' });
   const allowed = {};
   if(typeof req.body.done === 'boolean') allowed.done = req.body.done;
-  if(typeof req.body.title === 'string') allowed.title = req.body.title.trim().slice(0,500);
+  if(typeof req.body.title === 'string'){
+    if(!req.body.title.trim()) return res.status(400).json({error:'Название не может быть пустым'});
+    allowed.title = req.body.title.trim().slice(0,500);
+  }
   if(['work','home','errands','personal','other'].includes(req.body.context)) allowed.context = req.body.context;
   if(['low','normal','high'].includes(req.body.urgency)) allowed.urgency = req.body.urgency;
+  if('due' in req.body){
+    if(req.body.due !== null && !validDate(req.body.due)) return res.status(400).json({error:'Неверный срок'});
+    allowed.due=req.body.due;
+  }
   db.get('tasks').find({ id: req.params.id, userId: req.userId }).assign(allowed).write();
   res.json({ ok: true });
 });
@@ -176,7 +184,7 @@ app.post('/api/tasks/:id/split', auth, async (req, res) => {
   if(!task) return res.status(404).json({ error: 'Задача не найдена' });
   try{
     let steps = [];
-    if(process.env.FLOW_AI_URL || 'https://flow-ai-v2.onrender.com'){
+    if(req.body.mode === 'cloud'){
       try{
         steps = await aiSplitTask(task.title);
       }catch(aiError){
@@ -184,22 +192,22 @@ app.post('/api/tasks/:id/split', auth, async (req, res) => {
         return res.status(502).json({ error: 'AI: '+aiError.message });
       }
     }
-    if(!Array.isArray(steps) || steps.length < 2) steps = localSplit(task.title);
+    if(req.body.mode !== 'cloud') steps = splitLocal(task.title);
     if(!Array.isArray(steps) || steps.length < 2){
-      return res.status(422).json({ error: 'AI не вернул отдельные шаги' });
+      return res.status(422).json({ error: 'Нет готовых локальных шагов. Уточните задачу или выберите ИИ онлайн.' });
     }
-    db.get('tasks').remove({ id: task.id }).write();
+
     const newTasks = steps.map(s => ({
       id: crypto.randomUUID(),
       userId: req.userId,
       title: s,
       context: task.context,
       urgency: task.urgency,
-      due: null,
+      due: task.due,
       done: false,
       createdAt: Date.now()
     }));
-    newTasks.forEach(t => db.get('tasks').push(t).write());
+    db.set('tasks', db.get('tasks').value().filter(t=>t.id!==task.id).concat(newTasks)).write();
     res.json(newTasks);
   }catch(e){
     console.error(e);
@@ -373,22 +381,30 @@ function localSplit(title){
   return [clean];
 }
 
-// ---------- local smart planner ----------
-app.get('/api/plan/today', auth, (req, res) => {
-  const date = String(req.query.date || isoLocal(new Date()));
-  const energyRec = db.get('energy').find({ userId:req.userId, date }).value();
-  const energy = energyRec ? energyRec.level : 'normal';
-  const all = db.get('tasks').filter({ userId:req.userId, done:false }).value();
-  const maxItems = energy==='low' ? 2 : energy==='high' ? 5 : 3;
-  const scored = all.map(t=>{
-    let score=t.urgency==='high'?40:t.urgency==='low'?5:20;
-    if(t.due){ const delta=Math.ceil((new Date(t.due+'T12:00:00')-new Date(date+'T12:00:00'))/86400000); if(delta<0)score+=80; else if(delta===0)score+=65; else if(delta===1)score+=45; else if(delta<=3)score+=25; }
-    score += Math.max(0, 10-Math.floor((Date.now()-t.createdAt)/86400000));
-    return {...t, score};
-  }).sort((a,b)=>b.score-a.score || a.createdAt-b.createdAt);
-  const plan=scored.slice(0,maxItems);
-  const message = !plan.length ? 'На сегодня всё свободно.' : energy==='low' ? 'Сил немного — оставил только самое нужное.' : energy==='high' ? 'Энергии много — можно взять чуть больше задач.' : 'Собрал план по важности и срокам.';
-  res.json({ date, energy, message, tasks:plan });
+// Local daily plans are stored per user and date.
+function validDate(date){ return /^\d{4}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(Date.parse(date)) && new Date(date).toISOString().slice(0,10) === date; }
+app.get('/api/plan/:date', auth, (req,res)=>{
+  if(!validDate(req.params.date)) return res.status(400).json({error:'Неверная дата'});
+  res.json(db.get('plans').find({userId:req.userId,date:req.params.date}).value() || {ids:[]});
+});
+app.post('/api/plan/:date', auth, (req,res)=>{
+  if(!validDate(req.params.date)) return res.status(400).json({error:'Неверная дата'});
+  const energy = db.get('energy').find({userId:req.userId,date:req.params.date}).value();
+  const plan = makePlan(db.get('tasks').filter({userId:req.userId}).value(), energy?.level || 'normal', req.params.date);
+  const record = {userId:req.userId,date:req.params.date,...plan};
+  db.get('plans').remove({userId:req.userId,date:req.params.date}).write();
+  db.get('plans').push(record).write();
+  res.json(record);
+});
+app.put('/api/plan/:date', auth, (req,res)=>{
+  if(!validDate(req.params.date)) return res.status(400).json({error:'Неверная дата'});
+  const record = db.get('plans').find({userId:req.userId,date:req.params.date}).value();
+  if(!record) return res.status(404).json({error:'Сначала составьте план'});
+  const ids = req.body.ids;
+  const owned = new Set(db.get('tasks').filter({userId:req.userId,done:false}).value().map(t=>t.id));
+  if(!Array.isArray(ids) || ids.length>50 || new Set(ids).size!==ids.length || ids.some(id=>!owned.has(id))) return res.status(400).json({error:'Неверный список задач'});
+  db.get('plans').find({userId:req.userId,date:req.params.date}).assign({ids}).write();
+  res.json({ok:true});
 });
 
 // ---------- energy ----------
