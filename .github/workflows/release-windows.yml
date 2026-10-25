@@ -47,6 +47,10 @@ jobs:
         shell: powershell
         run: |
           npx asar extract dist/win-unpacked/resources/app.asar dist/asar-check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($file in @('task-features.js','preload.js','public/features.js')) {
+            if (-not (Test-Path "dist/asar-check/$file")) { throw "Missing packaged file: $file" }
+          }
           Select-String -Path dist/asar-check/server.js -Pattern "flow-ai-v2.onrender.com" -SimpleMatch
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

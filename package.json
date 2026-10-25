@@ -1,6 +1,6 @@
 {
   "name": "flow-app",
-  "version": "1.5.7",
+  "version": "1.6.0",
   "description": "Flow — private local adaptive organizer with smart planning",
   "main": "electron-main.js",
   "scripts": {
@@ -30,7 +30,9 @@
       "server.js",
       "package.json",
       "public/**/*",
-      "planner.js"
+      "planner.js",
+      "task-features.js",
+      "preload.js"
     ],
     "extraResources": [
       {

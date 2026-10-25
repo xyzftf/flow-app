@@ -44,7 +44,7 @@ const PORT = process.env.PORT || 3000;
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '64kb' }));
+app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/api/health', (_req, res) => res.json({ ok: true, localPlanner: true, version: require('./package.json').version }));
 
@@ -137,59 +137,7 @@ app.get('/api/me/stats', auth, (req, res) => {
   res.json({ total:tasks.length, done:tasks.filter(t=>t.done).length, open:tasks.filter(t=>!t.done).length, completedToday, completed7, byContext });
 });
 
-// ---------- tasks ----------
-app.get('/api/tasks', auth, (req, res) => {
-  const tasks = db.get('tasks').filter({ userId: req.userId }).value();
-  res.json(tasks);
-});
-
-app.post('/api/tasks', auth, (req, res) => {
-  const { title, context, urgency, due } = req.body;
-  if(!title) return res.status(400).json({ error: 'Нужен title' });
-  const task = {
-    id: crypto.randomUUID(),
-    userId: req.userId,
-    title,
-    context: context || 'other',
-    urgency: urgency || 'normal',
-    due: due || null,
-    done: false,
-    createdAt: Date.now()
-  };
-  db.get('tasks').push(task).write();
-  res.json(task);
-});
-
-app.put('/api/tasks/:id', auth, (req, res) => {
-  const task = db.get('tasks').find({ id: req.params.id, userId: req.userId }).value();
-  if(!task) return res.status(404).json({ error: 'Задача не найдена' });
-  const allowed = {};
-  if(typeof req.body.done === 'boolean') allowed.done = req.body.done;
-  if(typeof req.body.title === 'string'){
-    if(!req.body.title.trim()) return res.status(400).json({error:'Название не может быть пустым'});
-    allowed.title = req.body.title.trim().slice(0,500);
-  }
-  if(['work','home','errands','personal','other'].includes(req.body.context)) allowed.context = req.body.context;
-  if(['low','normal','high'].includes(req.body.urgency)) allowed.urgency = req.body.urgency;
-  if('due' in req.body){
-    if(req.body.due !== null && !validDate(req.body.due)) return res.status(400).json({error:'Неверный срок'});
-    allowed.due=req.body.due;
-  }
-  db.get('tasks').find({ id: req.params.id, userId: req.userId }).assign(allowed).write();
-  res.json({ ok: true });
-});
-
-app.delete('/api/tasks/:id', auth, (req, res) => {
-  const task=db.get('tasks').find({id:req.params.id,userId:req.userId}).value();
-  if(!task) return res.status(404).json({error:'Задача не найдена'});
-  db.set('tasks',db.get('tasks').value().filter(t=>t.id!==task.id)).value();
-  db.get('plans').filter({userId:req.userId}).value().forEach(plan=>{
-    plan.ids=(plan.ids||[]).filter(id=>id!==task.id);
-    if(plan.reasons) delete plan.reasons[task.id];
-  });
-  db.write();
-  res.json({ ok: true });
-});
+require('./task-features').installFeatures(app,auth,db,DATA_DIR);
 
 // split a task into steps via Claude, replacing the original
 app.post('/api/tasks/:id/split', auth, async (req, res) => {
@@ -210,18 +158,13 @@ app.post('/api/tasks/:id/split', auth, async (req, res) => {
       return res.status(422).json({ error: 'Нет готовых локальных шагов. Уточните задачу или выберите ИИ онлайн.' });
     }
 
-    const newTasks = steps.map(s => ({
-      id: crypto.randomUUID(),
-      userId: req.userId,
-      title: s,
-      context: task.context,
-      urgency: task.urgency,
-      due: task.due,
-      done: false,
-      createdAt: Date.now()
-    }));
-    db.set('tasks', db.get('tasks').value().filter(t=>t.id!==task.id).concat(newTasks)).write();
-    res.json(newTasks);
+    if(!db.get('tasks').find({id:task.id,userId:req.userId}).value()) return res.status(404).json({error:'Задача уже удалена'});
+    if(task.done) return res.status(409).json({error:'Сначала верните задачу из архива'});
+    if(task.subtasks?.length) return res.status(409).json({error:'В задаче уже есть шаги. Их можно изменить вручную.'});
+    steps=steps.filter(s=>typeof s==='string'&&s.trim());
+    if(steps.length<2)return res.status(422).json({error:'Не получены полезные шаги'});
+    task.subtasks=steps.slice(0,100).map(title=>({id:crypto.randomUUID(),title:title.trim().slice(0,500),done:false}));
+    db.write();res.json(task);
   }catch(e){
     console.error(e);
     res.status(500).json({ error: 'Не получилось разбить задачу' });
@@ -455,7 +398,7 @@ app.get('/api/log-week', auth, (req, res) => {
   for(let i=0;i<7;i++){
     const d = new Date();
     d.setDate(d.getDate()-i);
-    days.push(d.toISOString().slice(0,10));
+    days.push(isoLocal(d));
   }
   const result = days.map(date => ({
     date,

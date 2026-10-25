@@ -1,8 +1,9 @@
-const { app, BrowserWindow, shell, dialog } = require('electron');
+const { app, BrowserWindow, shell, dialog, ipcMain, Notification } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
+app.setAppUserModelId('com.flow.organizer');
 let server;
 let updatePromptOpen = false;
 const gotLock = app.requestSingleInstanceLock();
@@ -34,12 +35,26 @@ async function createWindow(){
     backgroundColor: '#EDEFEA',
     title: 'Flow',
     icon: path.join(__dirname, 'public', 'icons', 'icon-512.png'),
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+    webPreferences: { backgroundThrottling: false, preload: path.join(__dirname,'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
   win.setMenuBarVisibility(false);
   win.webContents.setWindowOpenHandler(({ url })=>{
     if(/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };
+  });
+  const trusted=event=>event.sender===win.webContents && event.senderFrame===win.webContents.mainFrame && event.senderFrame.url.startsWith(`http://127.0.0.1:${started.port}/`);
+  ipcMain.removeHandler('flow:notifications-supported');ipcMain.removeHandler('flow:notify');
+  ipcMain.handle('flow:notifications-supported',event=>trusted(event)&&Notification.isSupported());
+  ipcMain.handle('flow:notify',async(event,payload)=>{
+    if(!trusted(event)||!Notification.isSupported()||typeof payload?.title!=='string'||typeof payload?.body!=='string')return false;
+    return new Promise(resolve=>{
+      const notification=new Notification({title:payload.title.slice(0,100),body:payload.body.slice(0,600),icon:path.join(__dirname,'public','icons','icon-192.png')});
+      const timer=setTimeout(()=>resolve(false),5000);
+      notification.once('show',()=>{clearTimeout(timer);resolve(true);});
+      notification.once('failed',()=>{clearTimeout(timer);resolve(false);});
+      notification.on('click',()=>{if(win.isMinimized())win.restore();win.show();win.focus();});
+      notification.show();
+    });
   });
   await win.loadURL(`http://127.0.0.1:${started.port}`);
   setupAutoUpdates(win);

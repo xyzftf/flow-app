@@ -153,6 +153,15 @@
   .evening-theme .delete-task,.evening-theme .overdue{color:#ffb7ac;}
   .deadline-editor{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:12px;}
   .deadline-editor label{display:flex;flex-direction:column;gap:6px;font-size:12px;}
+  .library-tools{display:grid;gap:10px;}.library-selects{display:flex;flex-wrap:wrap;gap:12px;}.library-selects label{display:grid;gap:6px;flex:1;}
+  .library-tools input,.library-tools select,.feature-form input,.feature-form select{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px;font:inherit;max-width:100%;box-sizing:border-box;}
+  .feature-form{display:flex;flex-direction:column;gap:8px;margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:12px;}.feature-form label{display:flex;flex-direction:column;gap:6px;font-size:13px;}
+  .subtask-panel{margin-top:14px;}.subtask-panel summary{cursor:pointer;font-size:13px;color:var(--ink-soft);}
+  .subtask-row{display:flex;align-items:center;gap:8px;padding:8px 0;}.subtask-row .subtask-title{flex:1;min-width:0;overflow-wrap:anywhere;}.subtask-row input[type=checkbox]{accent-color:var(--moss);width:17px;height:17px;}.subtask-row.completed .subtask-title{text-decoration:line-through;opacity:.65;}
+  .subtask-add{display:flex;gap:8px;margin-top:8px;}.subtask-add input{min-width:0;flex:1;padding:8px;border-radius:8px;background:var(--card);color:var(--ink);border:1px solid var(--line);}
+  .undo-banner{position:sticky;top:10px;z-index:20;background:var(--card);border:1px solid var(--moss);border-radius:12px;padding:12px;margin:10px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}.undo-banner[hidden]{display:none;}.undo-banner span{flex:1;}
+  .trash-row{display:flex;gap:12px;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--line);}.trash-row span{overflow-wrap:anywhere;}
+  .feature-actions{display:flex;gap:8px;flex-wrap:wrap;}.checkbox{cursor:pointer;padding:0;background:transparent;flex-shrink:0;}
 </style>
 </head>
 <body>
@@ -183,6 +192,7 @@
     <div class="date-tag" id="dateTag"></div>
   </div>
 
+<div id="undoDelete" class="undo-banner" hidden role="status"><span id="undoText"></span><button type="button" id="undoButton" class="task-action">Вернуть</button><button type="button" id="dismissUndo" class="task-action" aria-label="Закрыть сообщение">×</button></div>
   <div class="gentle-toast" id="gentleToast" style="display:none;"></div>
 
   <div class="tabs">
@@ -254,6 +264,12 @@
 
   <!-- ALL TAB -->
   <div id="tab-all" style="display:none;">
+    <div class="card library-tools">
+      <label for="taskSearch">Поиск по задачам и шагам</label><input type="search" id="taskSearch" placeholder="Название задачи или подзадачи">
+      <div class="library-selects"><label>Раздел<select id="taskView"><option value="active">Активные</option><option value="archive">Архив выполненного</option><option value="trash">Удалённые (30 дней)</option></select></label>
+      <label>Показать<select id="taskQuickFilter"><option value="all">Все</option><option value="today">Дедлайн сегодня</option><option value="overdue">Просроченные</option><option value="high">Важные</option><option value="undated">Без дедлайна</option></select></label></div>
+      <div class="hint" id="libraryCount" role="status"></div>
+    </div>
     <div class="section-label" style="margin-top:0;">Все дела</div>
     <div class="filter-row">
       <button class="filter-chip active" data-filter="all">все</button>
@@ -309,6 +325,12 @@
     </div>
     <div class="card"><div class="section-label" style="margin-top:0;">Ближайшие дедлайны</div><div id="profileDeadlines"></div></div>
     <div class="card"><div class="section-label" style="margin-top:0;">Настройки</div><p class="hint">Вечерняя тема сохраняется после перезапуска.</p><button class="primary" id="themeToggle" type="button" aria-pressed="false">Включить вечернюю тему</button></div>
+    <div class="card"><div class="section-label" style="margin-top:0;">Резервная копия</div>
+      <p class="hint">Сохрани задачи, подзадачи, историю, планы и профиль в файл и перенеси на другой компьютер. Пароли и ключи в копию не входят. Файл содержит тексты твоих задач.</p>
+      <button class="primary" id="backupExport">Скачать копию</button><button class="task-action" id="backupImport">Восстановить из файла</button><input type="file" id="backupFile" accept=".json,application/json" hidden>
+      <p class="hint">Восстановление добавляет отсутствующие задачи. Существующие задачи и заполненные поля профиля не заменяются. Удалённые задачи в копию не входят.</p><div class="status" id="backupStatus" role="status"></div>
+    </div>
+    <div class="card"><div class="section-label" style="margin-top:0;">Напоминания Windows</div><p class="hint">Включай напоминание кнопкой у задачи. Flow должен быть открыт или свёрнут; после полного закрытия напоминания не приходят. Также проверь разрешение уведомлений Flow в Windows.</p><button class="task-action" id="testNotification">Проверить уведомление</button><div class="status" id="notificationStatus" role="status"></div></div>
     <div class="card">
       <button class="primary" id="logoutBtn" style="background:var(--card); color:var(--ink); border:1px solid var(--line);">Выйти из аккаунта</button>
     </div>
@@ -316,6 +338,7 @@
 </div>
 </div>
 
+<script src="/features.js"></script>
 <script>
 const API = '';
 let token = localStorage.getItem('flowToken');
@@ -376,6 +399,7 @@ document.getElementById('authSubmitBtn').addEventListener('click', async ()=>{
 });
 
 function logout(){
+  stopReminderPolling();document.getElementById('undoDelete').hidden=true;lastDeleted=null;expandedTasks.clear();
   token = null;
   localStorage.removeItem('flowToken');
   document.getElementById('app').style.display = 'none';
@@ -401,6 +425,7 @@ async function startApp(){
   await loadTasks();
   render();
   await loadSmartPlan();
+  startReminderPolling();
 }
 
 async function loadTasks(){
@@ -545,17 +570,7 @@ document.querySelectorAll('.filter-chip').forEach(chip=>{
   });
 });
 
-function renderFullList(){
-  const list = document.getElementById('fullList');
-  list.innerHTML = '';
-  let filtered = currentFilter==='all' ? tasks : tasks.filter(t=>t.context===currentFilter);
-  if(filtered.length===0){
-    list.innerHTML = '<div class="empty">Здесь пока ничего нет.</div>';
-    return;
-  }
-  const sorted = [...filtered].sort((a,b)=> (a.done - b.done) || urgencyRank(a.urgency)-urgencyRank(b.urgency));
-  sorted.forEach(t=> list.appendChild(renderTask(t)));
-}
+function renderFullList(){ renderLibrary(); }
 
 function contextLabel(c){ return {work:'работа / учёба', home:'дом', errands:'поручения', personal:'личное', other:'разное'}[c] || 'разное'; }
 
@@ -563,30 +578,21 @@ function renderTask(t){
   const el = document.createElement('div');
   el.className = 'task';
   el.innerHTML = `
-    <div class="checkbox ${t.done?'done':''}"></div>
+    <button type="button" class="checkbox ${t.done?'done':''}" aria-label="${t.done?'Вернуть из архива':'Завершить задачу'}"></button>
     <div class="task-body">
       <div class="task-title ${t.done?'done':''}">${escapeHtml(t.title)}</div>
       <div class="task-meta">
         <span class="pill context-pill" data-context-edit="1">${contextLabel(t.context)}</span>
         ${t.urgency==='high' ? `<span class="pill urgent">важно</span>` : ''}
-        ${!t.done ? `<span class="split-link">шаги локально</span>` : ''}
+        ${!t.done && !t.subtasks?.length ? `<span class="split-link">шаги локально</span>` : ''}
       </div>
     </div>
   `;
   el.addEventListener('click', async (ev)=>{
-    if(ev.target.closest('button, input, select, .task-editor') || ev.target.classList.contains('split-link') || ev.target.closest('.context-select') || ev.target.classList.contains('context-pill')) return;
-    const previous = t.done;
-    t.done = !t.done;
-    try{
-      await api('/api/tasks/'+t.id, { method:'PUT', body: JSON.stringify({done:t.done}) });
-      if(t.done){ await api('/api/log/'+todayKey(), { method:'POST', body: JSON.stringify({text:t.title}) }); }
-    }catch(e){
-      t.done = previous;
-      showGentleToast(e.message);
-    }
-    render();
-    renderFullList();
-    loadSmartPlan();
+    if(!ev.target.closest('.checkbox'))return;
+    const button=el.querySelector('.checkbox');button.disabled=true;
+    try{await api('/api/tasks/'+t.id,{method:'PUT',body:JSON.stringify({done:!t.done})});await refreshTaskViews();}
+    catch(e){showGentleToast(e.message);button.disabled=false;}
   });
   const splitLink = el.querySelector('.split-link');
   if(splitLink){
@@ -594,8 +600,8 @@ function renderTask(t){
       ev.stopPropagation();
       splitLink.textContent = 'разбираю...';
       try{
-        const newTasks = await api('/api/tasks/'+t.id+'/split', { method:'POST' });
-        tasks = tasks.filter(x=>x.id!==t.id).concat(newTasks);
+        const updated = await api('/api/tasks/'+t.id+'/split', { method:'POST' });
+        Object.assign(t,updated); expandedTasks.add(t.id);
         render();
         renderFullList();
         loadSmartPlan();
@@ -604,15 +610,15 @@ function renderTask(t){
       }
     });
   }
-  if(!t.done){
+  if(!t.done && !t.subtasks?.length){
     const online=document.createElement('button'); online.className='energy-btn'; online.textContent='ИИ онлайн';
     online.onclick=async ev=>{
       ev.stopPropagation();
       if(!confirm('Отправить текст этой задачи во внешний ИИ-сервис для разбиения?')) return;
       online.disabled=true;
       try{
-        const steps=await api('/api/tasks/'+t.id+'/split',{method:'POST',body:JSON.stringify({mode:'cloud'})});
-        tasks=tasks.filter(x=>x.id!==t.id).concat(steps);render();renderFullList();loadSmartPlan();
+        const updated=await api('/api/tasks/'+t.id+'/split',{method:'POST',body:JSON.stringify({mode:'cloud'})});
+        Object.assign(t,updated);expandedTasks.add(t.id);render();renderFullList();loadSmartPlan();
       }catch(e){showGentleToast(e.message);}finally{online.disabled=false;}
     };
     el.querySelector('.task-meta').appendChild(online);
@@ -651,7 +657,7 @@ function renderTask(t){
     form.onclick=e=>e.stopPropagation();
     const update=async due=>{
       form.querySelectorAll('button').forEach(b=>b.disabled=true);
-      try{await api('/api/tasks/'+t.id,{method:'PUT',body:JSON.stringify({due})});t.due=due;render();renderFullList();loadSmartPlan();}
+      try{const updated=await api('/api/tasks/'+t.id,{method:'PUT',body:JSON.stringify({due})});Object.assign(t,updated);render();renderFullList();loadSmartPlan();}
       catch(e){showGentleToast(e.message);form.querySelectorAll('button').forEach(b=>b.disabled=false);}
     };
     form.onsubmit=e=>{e.preventDefault();update(input.value||null);};clear.onclick=()=>update(null);
@@ -661,9 +667,9 @@ function renderTask(t){
   const remove=document.createElement('button');remove.className='task-action delete-task';remove.textContent='Удалить';
   remove.setAttribute('aria-label','Удалить задачу: '+t.title);
   remove.onclick=async ev=>{
-    ev.stopPropagation();if(!confirm('Удалить задачу «'+t.title+'»?')) return;
+    ev.stopPropagation();
     remove.disabled=true;
-    try{await api('/api/tasks/'+t.id,{method:'DELETE'});tasks=tasks.filter(x=>x.id!==t.id);render();renderFullList();await loadSmartPlan();}
+    try{await api('/api/tasks/'+t.id,{method:'DELETE'});showUndo(t);await refreshTaskViews();}
     catch(e){showGentleToast(e.message);remove.disabled=false;}
   };
   el.querySelector('.task-meta').appendChild(remove);
@@ -686,6 +692,7 @@ function renderTask(t){
     el.querySelector('.task-body').appendChild(form);
   };
   el.querySelector('.task-meta').appendChild(edit);
+  addTaskFeatures(t,el);
   return el;
 }
 
