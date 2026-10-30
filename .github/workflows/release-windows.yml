@@ -34,6 +34,12 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Install test browser
+        run: npx playwright install chromium
+
+      - name: Test real user clicks
+        run: npm run test:ui
+
       - name: Verify packaged source
         shell: powershell
         run: |

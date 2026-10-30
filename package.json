@@ -1,6 +1,6 @@
 {
   "name": "flow-app",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Flow — private local adaptive organizer with smart planning",
   "main": "electron-main.js",
   "scripts": {
@@ -8,7 +8,8 @@
     "desktop": "electron .",
     "dist:win": "electron-builder --win nsis",
     "release:win": "electron-builder --win nsis --publish always",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "test:ui": "node browser-tests/completion.cjs"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -19,7 +20,8 @@
   },
   "devDependencies": {
     "electron": "^38.1.2",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "playwright": "1.62.1"
   },
   "build": {
     "appId": "com.flow.organizer",

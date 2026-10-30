@@ -73,10 +73,10 @@
   .task{ display:flex; align-items:flex-start; gap:12px; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:10px; cursor:pointer; transition:border-color .15s ease, background .15s ease; animation: fadeInUp .25s ease; }
   .task:hover{border-color:var(--moss);}
   .task:active{background:var(--bg);}
-  .checkbox{ width:22px;height:22px; border-radius:50%; border:1.5px solid var(--moss); flex-shrink:0; margin-top:2px; cursor:pointer; position:relative; pointer-events:none; }
+  .checkbox{ width:22px;height:22px; border-radius:50%; border:1.5px solid var(--moss); flex-shrink:0; margin-top:2px; cursor:pointer; position:relative; pointer-events:auto; }
   .checkbox.done{background:var(--moss);}
   .checkbox.done::after{ content:''; position:absolute; left:6px; top:2px; width:5px; height:9px; border:solid white; border-width:0 2px 2px 0; transform:rotate(45deg); }
-  .task-body{flex:1;}
+  .task-body{flex:1;min-width:0;}
   .task-title{font-size:15px; line-height:1.4;}
   .task-title.done{text-decoration:line-through; color:var(--ink-soft);}
   .task-meta{ display:flex; gap:8px; margin-top:5px; flex-wrap:wrap; align-items:center; }
@@ -544,9 +544,11 @@ function renderPlan(){
   if(!ids.length){ list.textContent='Нет запланированных дел. Нажми кнопку, чтобы выбрать задачи.'; return; }
   ids.forEach((id,index)=>{
     const task=tasks.find(t=>t.id===id);
-    const row=document.createElement('div'); row.className='task';
-    const text=document.createElement('span'); text.style.flex='1';
-    text.textContent=`${index+1}. ${task.title}`; row.appendChild(text);
+    const row=renderTask(task);
+    const order=document.createElement('div');order.className='hint';order.textContent=`В плане: ${index+1}`;
+    row.querySelector('.task-body').prepend(order);
+    const controls=document.createElement('div');controls.className='feature-actions';controls.style.marginTop='12px';
+    row.querySelector('.task-body').appendChild(controls);
     for(const [label,action,disabled] of [['↑',-1,index===0],['↓',1,index===ids.length-1],['Убрать',0,false]]){
       const button=document.createElement('button'); button.className='energy-btn'; button.textContent=label; button.disabled=disabled;
       button.setAttribute('aria-label',label+' — '+task.title);
@@ -555,7 +557,7 @@ function renderPlan(){
         list.querySelectorAll('button').forEach(b=>b.disabled=true);
         try{await api('/api/plan/'+todayKey(),{method:'PUT',body:JSON.stringify({ids:updated})});dailyPlan.ids=updated;}
         catch(e){showGentleToast(e.message);} finally{renderPlan();}
-      }; row.appendChild(button);
+      }; controls.appendChild(button);
     }
     list.appendChild(row);
   });
@@ -588,12 +590,20 @@ function renderTask(t){
       </div>
     </div>
   `;
-  el.addEventListener('click', async (ev)=>{
-    if(!ev.target.closest('.checkbox'))return;
-    const button=el.querySelector('.checkbox');button.disabled=true;
+  const completeButton=document.createElement('button');
+  completeButton.type='button';completeButton.className='task-action complete-task';
+  completeButton.textContent=t.done?'Вернуть в активные':'Выполнить';
+  el.querySelector('.task-meta').prepend(completeButton);
+  const complete=async ev=>{
+    ev.stopPropagation();
+    const checkbox=el.querySelector('.checkbox');
+    if(checkbox.disabled)return;
+    checkbox.disabled=true;completeButton.disabled=true;
     try{await api('/api/tasks/'+t.id,{method:'PUT',body:JSON.stringify({done:!t.done})});await refreshTaskViews();}
-    catch(e){showGentleToast(e.message);button.disabled=false;}
-  });
+    catch(e){showGentleToast(e.message);checkbox.disabled=false;completeButton.disabled=false;}
+  };
+  el.querySelector('.checkbox').addEventListener('click',complete);
+  completeButton.addEventListener('click',complete);
   const splitLink = el.querySelector('.split-link');
   if(splitLink){
     splitLink.addEventListener('click', async (ev)=>{

@@ -37,7 +37,7 @@ function addTaskFeatures(task,el){
  const steps=task.subtasks||[];
  const details=document.createElement('details');details.className='subtask-panel';details.open=expandedTasks.has(task.id);
  const summary=document.createElement('summary');summary.textContent=steps.length?`Подзадачи: ${steps.filter(s=>s.done).length} из ${steps.length}`:'＋ Добавить подзадачи';details.appendChild(summary);
- details.ontoggle=()=>{if(details.open)expandedTasks.add(task.id);else expandedTasks.delete(task.id);};
+ details.ontoggle=()=>{if(!details.isConnected)return;if(details.open)expandedTasks.add(task.id);else expandedTasks.delete(task.id);};
  const saveSteps=async list=>{expandedTasks.add(task.id);await updateFeature(task,{subtasks:list});};
  steps.forEach(step=>{
   const row=document.createElement('div');row.className='subtask-row'+(step.done?' completed':'');
@@ -63,6 +63,7 @@ function addTaskFeatures(task,el){
   details.appendChild(form);
  }
  if(steps.length||!task.done)body.appendChild(details);
+ if(!task.done){const addStep=actionButton('Добавить подзадачу',()=>{expandedTasks.add(task.id);details.open=true;details.querySelector('.subtask-add input')?.focus();});addStep.classList.add('add-subtask-button');meta.appendChild(addStep);}
  if(task.done){meta.appendChild(actionButton('Вернуть из архива',async()=>{try{await updateFeature(task,{done:false});}catch(e){showGentleToast(e.message);}}));return;}
  meta.appendChild(actionButton(task.repeat?'Повтор: '+({daily:'каждый день',weekly:'еженедельно',monthly:'ежемесячно'}[task.repeat.type]):'Повторять',()=>openRepeat(task,body)));
  meta.appendChild(actionButton(task.reminder?'Напоминание: '+task.reminder.time:'Напомнить',()=>openReminder(task,body)));
