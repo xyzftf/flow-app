@@ -24,7 +24,14 @@ async function createWindow(){
   loadWindowsUserApiKey();
   process.env.FLOW_DATA_DIR = path.join(app.getPath('userData'), 'data');
   const { startServer } = require('./server');
-  const started = await startServer(32147);
+  let started;
+  try {
+    started = await startServer(32147);
+  } catch (error) {
+    if(error.code !== 'EADDRINUSE') throw error;
+    console.warn('Port 32147 is busy; selecting a free local port');
+    started = await startServer(0);
+  }
   server = started.server;
 
   const win = new BrowserWindow({
@@ -107,8 +114,16 @@ function setupAutoUpdates(win){
   setTimeout(()=>autoUpdater.checkForUpdates().catch(error=>console.error('Update check failed:', error.message)), 5000);
 }
 
-app.whenReady().then(createWindow).catch(error=>{
-  console.error(error);
+app.whenReady().then(createWindow).catch(async error=>{
+  console.error('Flow startup failed:', error);
+  try {
+    await dialog.showMessageBox({
+      type: 'error', title: 'Flow не запускается',
+      message: 'Не удалось запустить Flow',
+      detail: String(error && (error.stack || error.message) || error),
+      buttons: ['Закрыть']
+    });
+  } catch (_) {}
   app.quit();
 });
 
